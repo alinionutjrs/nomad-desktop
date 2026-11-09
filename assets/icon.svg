@@ -1,5 +1,10 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
-  <rect width="512" height="512" rx="124" fill="#10140e"/>
-  <path d="M116 386V126h62l156 158V126h62v260h-59L178 225v161z" fill="#b7f36b"/>
-  <path d="M395 88l11 27 27 11-27 11-11 27-11-27-27-11 27-11z" fill="#eef9df"/>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" fill="none">
+  <defs>
+    <linearGradient id="trail" x1="118" y1="393" x2="393" y2="118" gradientUnits="userSpaceOnUse"><stop stop-color="#B7F36B"/><stop offset="1" stop-color="#66DEC3"/></linearGradient>
+    <linearGradient id="glint" x1="366" y1="72" x2="440" y2="146" gradientUnits="userSpaceOnUse"><stop stop-color="#F4FFD9"/><stop offset="1" stop-color="#B7F36B"/></linearGradient>
+  </defs>
+  <rect x="16" y="16" width="480" height="480" rx="142" fill="#101713"/>
+  <path d="M128 380V132h63l193 179V132h61v248h-59L189 198v182h-61Z" fill="url(#trail)"/>
+  <path d="M390 69c4 22 15 33 37 37-22 4-33 15-37 37-4-22-15-33-37-37 22-4 33-15 37-37Z" fill="url(#glint)"/>
+  <circle cx="392" cy="106" r="6" fill="#101713"/>
 </svg>

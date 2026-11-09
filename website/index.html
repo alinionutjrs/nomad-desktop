@@ -1,0 +1,106 @@
+<!doctype html>
+<html lang="ro">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="theme-color" content="#0b100d" />
+    <meta name="description" content="Nomad este un studio desktop local-first pentru a transforma ideile în aplicații, păstrând codul și deciziile la tine." />
+    <meta property="og:type" content="website" />
+    <meta property="og:title" content="Nomad — Construiește local. Păstrează controlul." />
+    <meta property="og:description" content="Un studio local-first pentru idei care devin aplicații." />
+    <meta property="og:image" content="/assets/nomad-social.png" />
+    <link rel="icon" type="image/svg+xml" href="/assets/nomad-mark.svg" />
+    <link rel="preload" href="/assets/nomad-mark.svg" as="image" type="image/svg+xml" />
+    <link rel="stylesheet" href="/styles.css" />
+    <title>Nomad — Construiește local</title>
+  </head>
+  <body>
+    <header class="site-header">
+      <a class="brand" href="#top" aria-label="Nomad, pagina principală">
+        <img src="/assets/nomad-mark.svg" alt="" width="42" height="42" />
+        <span>nomad</span><i>PREVIEW</i>
+      </a>
+      <button class="menu-toggle" aria-label="Deschide meniul" aria-expanded="false"><span></span><span></span></button>
+      <nav class="navigation" aria-label="Navigare principală">
+        <a href="#cum-functioneaza">Cum funcționează</a>
+        <a href="#principii">Principii</a>
+        <a href="#descarca">Descarcă</a>
+        <a class="nav-cta" href="https://github.com/alinionutjrs/nomad-desktop" target="_blank" rel="noreferrer">Vezi proiectul <span>↗</span></a>
+      </nav>
+    </header>
+
+    <main id="top">
+      <section class="hero section-wrap">
+        <div class="hero-copy">
+          <div class="eyebrow"><span class="pulse"></span> UN STUDIO LOCAL PENTRU IDEI ÎN MIȘCARE</div>
+          <h1>Codul rămâne<br /><em>al tău.</em></h1>
+          <p class="hero-lede">Descrie ce vrei să construiești. Nomad pregătește schimbarea, tu o verifici, iar proiectul rulează pe calculatorul tău.</p>
+          <div class="hero-actions">
+            <a class="button button-primary" href="#descarca">Încearcă Nomad <span>↓</span></a>
+            <a class="button button-quiet" href="#cum-functioneaza">Vezi cum funcționează <span>→</span></a>
+          </div>
+          <div class="hero-meta"><span><b>01</b> Local-first</span><span><b>02</b> Approve-first</span><span><b>03</b> Rust + Tauri</span></div>
+        </div>
+
+        <div class="product-stage" aria-label="Ilustrație demonstrativă a interfeței Nomad">
+          <div class="stage-glow"></div>
+          <div class="stage-frame">
+            <div class="stage-top"><div class="window-dots"><i></i><i></i><i></i></div><span>nomad <b>/</b> plan de călătorie</span><span class="local-tag">LOCAL</span></div>
+            <div class="stage-body">
+              <aside class="stage-side"><div class="stage-side-brand"><img src="/assets/nomad-mark.svg" alt="" /> <b>nomad</b></div><div class="side-label">PROIECT</div><div class="side-item active"><span class="mini-icon">◈</span> trip-planner</div><div class="side-label side-label-files">FIȘIERE</div><div class="side-file">⌄ <span>src</span></div><div class="side-file indent">◧ App.tsx</div><div class="side-file indent">◧ styles.css</div><div class="side-file">◧ package.json</div><div class="side-bottom">◌ &nbsp; Local workspace</div></aside>
+              <div class="stage-work"><div class="stage-tabs"><span class="selected">✳ Agent</span><span>⌘ Editor</span><span>◉ Preview</span><span>◷ Istoric</span></div>
+                <div class="stage-content"><div class="conversation-label">CONVERSAȚIE <span>· trip-planner</span></div><div class="user-prompt"><span class="user-dot">A</span><p>Adaugă un mic rezumat meteo pentru orașul selectat.</p></div><div class="assistant-reply"><div class="assistant-mark"><img src="/assets/nomad-mark.svg" alt="" /></div><p>Voi adăuga un card compact cu temperatura și condițiile, păstrând stilul actual.</p></div>
+                  <div class="change-card"><div class="change-head"><div><span class="change-badge">SCHIMBARE PROPUSĂ</span><b>Card meteo în sumarul călătoriei</b><small>src/components/WeatherCard.tsx</small></div><span class="change-count">+12&nbsp; −2</span></div><div class="fake-diff"><div><i>18</i><span>−</span><code class="removed">&lt;h2&gt;Planul meu&lt;/h2&gt;</code></div><div><i>18</i><span>+</span><code class="added">&lt;WeatherCard city={city} /&gt;</code></div><div><i>19</i><span>+</span><code class="added">&lt;p&gt;18° · Parțial însorit&lt;/p&gt;</code></div></div><div class="change-actions"><span>Revizuiește înainte de scriere</span><button>✓ &nbsp; Acceptă</button></div></div>
+                </div><div class="stage-input"><span>Descrie ce vrei să construiești…</span><button>↑</button></div>
+              </div>
+            </div>
+            <div class="stage-caption"><span class="caption-line"></span> Exemplu ilustrativ · modificările reale sunt verificate în Nomad</div>
+          </div>
+          <div class="stage-orbit orbit-one"></div><div class="stage-orbit orbit-two"></div><span class="stage-coordinate coord-one">46°46′ N</span><span class="stage-coordinate coord-two">23°35′ E</span>
+        </div>
+      </section>
+
+      <section class="manifesto section-wrap" id="principii">
+        <div class="section-index"><span>01</span> / DIRECȚIE</div>
+        <div class="manifesto-content"><h2>AI-ul propune.<br /><em>Tu decizi.</em></h2><p>Un asistent de programare are nevoie de contextul proiectului. Asta nu înseamnă că trebuie să renunți la control. Nomad păstrează proiectele pe dispozitiv și îți arată fiecare schimbare înainte să fie aplicată.</p><a class="text-link" href="#cum-functioneaza">Urmărește traseul <span>↘</span></a></div>
+        <div class="manifesto-stamp"><img src="/assets/nomad-mark.svg" alt=""/><span>BUILD<br />LOCAL</span></div>
+      </section>
+
+      <section class="journey section-wrap" id="cum-functioneaza">
+        <div class="section-heading"><div class="section-index"><span>02</span> / FLUX DE LUCRU</div><h2>Din idee în aplicație,<br /><em>cu tine la volan.</em></h2><p>Un parcurs simplu, iar punctele importante rămân vizibile și reversibile.</p></div>
+        <div class="journey-line"><span></span></div>
+        <div class="steps">
+          <article class="step"><div class="step-number">01 <span>—</span> CONTEXT</div><div class="step-symbol symbol-chat">✳</div><h3>Începe cu o idee.</h3><p>Deschide un proiect local și descrie funcția sau corecția de care ai nevoie.</p><div class="step-foot">Proiectul tău · pe dispozitiv</div></article>
+          <article class="step"><div class="step-number">02 <span>—</span> REVIZUIRE</div><div class="step-symbol symbol-diff">±</div><h3>Vezi schimbarea.</h3><p>Nomad îți arată fișierele și diferențele propuse. Nimic nu se scrie fără aprobarea ta.</p><div class="step-foot">Diff clar · aprobare explicită</div></article>
+          <article class="step"><div class="step-number">03 <span>—</span> PREVIEW</div><div class="step-symbol symbol-route">↗</div><h3>Rulează local.</h3><p>Pornește dev-serverul proiectului, vezi preview-ul și revino la snapshot când e nevoie.</p><div class="step-foot">localhost · istoric Git local</div></article>
+        </div>
+      </section>
+
+      <section class="provider-band">
+        <div class="section-wrap provider-inner"><div><div class="section-index"><span>03</span> / ALEGE MODELUL</div><h2>Lucrează cu providerul<br />care <em>ți se potrivește.</em></h2><p>Conectează o cheie API compatibilă, un CLI deja autentificat sau un model local. Disponibilitatea fiecărei opțiuni depinde de configurarea ta.</p></div><div class="provider-list"><div class="provider-row"><span class="provider-symbol">⌘</span><div><b>API compatibil OpenAI</b><small>OpenAI · OpenRouter · endpoint-uri custom</small></div><span class="provider-arrow">↗</span></div><div class="provider-row"><span class="provider-symbol provider-purple">C</span><div><b>Claude Code CLI</b><small>Folosește sesiunea CLI de pe calculator</small></div><span class="provider-arrow">↗</span></div><div class="provider-row"><span class="provider-symbol provider-mint">◈</span><div><b>Codex CLI</b><small>Folosește sesiunea CLI de pe calculator</small></div><span class="provider-arrow">↗</span></div><div class="provider-row"><span class="provider-symbol provider-local">◎</span><div><b>Modele locale</b><small>Ollama și endpoint-uri locale compatibile</small></div><span class="provider-arrow">↗</span></div><div class="provider-note"><span>●</span> Cheile API sunt păstrate în seiful de credențiale al sistemului.</div></div></div>
+      </section>
+
+      <section class="values section-wrap">
+        <div class="section-index"><span>04</span> / ALEGERI DE DESIGN</div><div class="values-grid"><div class="values-title"><h2>Mai puține<br /><em>surprize.</em></h2><p>Construim Nomad în jurul unor limite ușor de înțeles.</p></div><article><span class="value-icon">⌂</span><h3>Fișierele rămân locale.</h3><p>Nomad păstrează proiectele în directoarele alese de tine. Furnizorul AI primește contextul cererii atunci când îi trimiți un mesaj.</p></article><article><span class="value-icon">✓</span><h3>Schimbările sunt propuneri.</h3><p>Inspectezi diff-ul și alegi dacă îl aplici. Snapshot-ul local îți oferă un punct de revenire.</p></article><article><span class="value-icon">⌘</span><h3>Un desktop ușor.</h3><p>Interfață React într-un webview de sistem, cu backend Rust și fără Electron.</p></article></div>
+      </section>
+
+      <section class="download-section section-wrap" id="descarca"><div class="download-card"><div class="download-copy"><div class="section-index"><span>05</span> / PRIMUL RELEASE</div><h2>Ia Nomad cu tine.</h2><p>Încearcă preview-ul pentru Windows x64. macOS și Linux au nevoie de builduri native înainte să publicăm instalatoarele pentru aceste platforme.</p><div class="download-meta"><span>Windows 10/11</span><span>x64</span><span>Preview 0.1.1</span></div><a class="button button-primary download-button" href="/downloads/Nomad_0.1.1_x64-setup.exe" download>Descarcă pentru Windows <span>↓</span></a><small class="download-note">Installer nesemnat · Windows poate afișa o avertizare SmartScreen la prima pornire.</small></div><div class="download-art"><div class="download-orbit"></div><img src="/assets/nomad-mark.svg" alt="Nomad"/><div class="download-ring ring-a"></div><div class="download-ring ring-b"></div><span>LOCAL<br />BY DESIGN</span></div></div></section>
+
+      <section class="last-word section-wrap"><p>Proiectul este încă în preview.<br /><em>Construim traseul împreună.</em></p><a href="https://github.com/alinionutjrs/nomad-desktop" target="_blank" rel="noreferrer">Urmărește proiectul pe GitHub ↗</a></section>
+    </main>
+
+    <footer class="site-footer"><a class="footer-brand" href="#top"><img src="/assets/nomad-mark.svg" alt="" width="30" height="30"/> nomad</a><span>Proiect independent în preview · build-uri locale, pas cu pas</span><a href="#top">Înapoi sus ↑</a></footer>
+    <script>
+      const menuButton = document.querySelector('.menu-toggle');
+      const navigation = document.querySelector('.navigation');
+      menuButton.addEventListener('click', () => {
+        const expanded = menuButton.getAttribute('aria-expanded') === 'true';
+        menuButton.setAttribute('aria-expanded', String(!expanded));
+        navigation.classList.toggle('open', !expanded);
+      });
+      navigation.addEventListener('click', (event) => {
+        if (event.target.closest('a')) { menuButton.setAttribute('aria-expanded', 'false'); navigation.classList.remove('open'); }
+      });
+    </script>
+  </body>
+</html>

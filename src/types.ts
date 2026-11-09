@@ -19,6 +19,13 @@ export type ChatMessage = {
   created_at: string;
 };
 
+export type ChatSession = {
+  id: number;
+  title: string;
+  created_at: string;
+  updated_at: string;
+};
+
 export type Proposal = {
   id: number;
   project_id: number;

@@ -1,13 +1,17 @@
 {
   "name": "nomad",
   "private": true,
-  "version": "0.1.0",
+  "version": "0.1.1",
   "type": "module",
   "scripts": {
-    "dev": "vite",
-    "build": "tsc && vite build",
-    "test": "vitest run",
-    "tauri": "tauri"
+    "dev": "vite --configLoader runner",
+    "build": "tsc && vite build --configLoader runner",
+    "test": "vitest run --configLoader runner",
+    "tauri": "tauri",
+    "build:windows": "tauri build --target x86_64-pc-windows-msvc",
+    "build:linux": "tauri build --target x86_64-unknown-linux-gnu",
+    "build:macos:apple": "tauri build --target aarch64-apple-darwin",
+    "build:macos:intel": "tauri build --target x86_64-apple-darwin"
   },
   "dependencies": {
     "@tauri-apps/api": "^2.9.1",
@@ -26,4 +30,3 @@
     "vitest": "^4.0.8"
   }
 }
-

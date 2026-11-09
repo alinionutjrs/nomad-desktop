@@ -30,3 +30,8 @@ export function splitCommandLine(value: string): string[] {
   return tokens;
 }
 
+export function processStartConfirmationAction(projectId: number, parts: string[]): string {
+  if (parts.length === 0) throw new Error("Comanda dev-server este goală.");
+  return `process:start:${projectId}:${parts[0]}:${JSON.stringify(parts)}`;
+}
+

@@ -4,7 +4,7 @@ use std::path::Path;
 use std::process::Command;
 
 fn git(root: &Path, args: &[&str]) -> Result<String> {
-    let output = Command::new("git")
+    let output = Command::new(crate::process_manager::command_executable("git"))
         .args(args)
         .current_dir(root)
         .output()
@@ -16,17 +16,21 @@ fn git(root: &Path, args: &[&str]) -> Result<String> {
 }
 
 pub fn ensure_repository(root: &Path) -> Result<()> {
-    let owns_repository = git(root, &["rev-parse", "--show-toplevel"])
-        .ok()
-        .and_then(|value| std::fs::canonicalize(value).ok())
-        .and_then(|repo_root| {
-            std::fs::canonicalize(root)
-                .ok()
-                .map(|workspace_root| repo_root == workspace_root)
-        })
-        .unwrap_or(false);
-    if !owns_repository {
+    let workspace_root = std::fs::canonicalize(root)?;
+    let git_dir = root.join(".git");
+    if !git_dir.exists() {
+        let has_parent_repository = root
+            .ancestors()
+            .skip(1)
+            .any(|ancestor| ancestor.join(".git").exists());
+        if has_parent_repository {
+            bail!("Proiectul este în interiorul altui repository Git. Creează un repository dedicat pentru snapshot-uri.");
+        }
         git(root, &["init", "--initial-branch=main"])?;
+    }
+    let repo_root = git(root, &["rev-parse", "--show-toplevel"])?;
+    if std::fs::canonicalize(repo_root)? != workspace_root {
+        bail!("Proiectul este în interiorul altui repository Git. Creează un repository dedicat pentru snapshot-uri.");
     }
     Ok(())
 }
@@ -119,5 +123,16 @@ mod tests {
             std::fs::read_to_string(directory.path().join("hello.txt")).unwrap(),
             "one"
         );
+    }
+
+    #[test]
+    fn refuses_to_commit_into_parent_repository() {
+        let parent = tempfile::tempdir().unwrap();
+        let project = parent.path().join("project");
+        std::fs::create_dir(&project).unwrap();
+        git(parent.path(), &["init", "--initial-branch=main"]).unwrap();
+        std::fs::write(project.join("file.txt"), "local").unwrap();
+        assert!(create_snapshot(&project, "should fail").is_err());
+        assert!(!project.join(".git").exists());
     }
 }

@@ -63,7 +63,10 @@ impl Workspace {
         let mut current = self.root.clone();
         for component in relative.components() {
             current.push(component.as_os_str());
-            if current.exists() && fs::symlink_metadata(&current)?.file_type().is_symlink() {
+            if fs::symlink_metadata(&current)
+                .map(|value| value.file_type().is_symlink())
+                .unwrap_or(false)
+            {
                 bail!("Symlink-urile nu pot fi traversate: {}", current.display());
             }
         }

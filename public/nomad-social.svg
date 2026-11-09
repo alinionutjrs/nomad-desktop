@@ -1,0 +1,21 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 630" fill="none">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1200" y2="630" gradientUnits="userSpaceOnUse"><stop stop-color="#111A15"/><stop offset="1" stop-color="#080C0A"/></linearGradient>
+    <linearGradient id="route" x1="600" y1="80" x2="1090" y2="550" gradientUnits="userSpaceOnUse"><stop stop-color="#B7F36B"/><stop offset="1" stop-color="#66DEC3"/></linearGradient>
+    <radialGradient id="glow" cx="0" cy="0" r="1" gradientTransform="matrix(360 0 0 300 982 286)" gradientUnits="userSpaceOnUse"><stop stop-color="#55CDAE" stop-opacity=".16"/><stop offset="1" stop-color="#55CDAE" stop-opacity="0"/></radialGradient>
+  </defs>
+  <path fill="url(#bg)" d="M0 0h1200v630H0z"/><path fill="url(#glow)" d="M0 0h1200v630H0z"/>
+  <path stroke="#29372F" stroke-width="1" d="M0 510h1200M0 550h1200M0 590h1200M800 0v630M840 0v630M880 0v630M920 0v630M960 0v630M1000 0v630M1040 0v630M1080 0v630M1120 0v630M1160 0v630" opacity=".35"/>
+  <rect x="76" y="76" width="74" height="74" rx="23" fill="#101713" stroke="#2C3A30"/>
+  <path d="M96 132V94h10l29 26V94h10v38h-10l-29-27v27H96Z" fill="url(#route)"/>
+  <path d="M132 87c1 7 5 11 12 12-7 1-11 5-12 12-1-7-5-11-12-12 7-1 11-5 12-12Z" fill="#F4FFD9"/>
+  <text x="168" y="126" fill="#EDF4E9" font-family="Segoe UI,Arial,sans-serif" font-size="37" font-weight="700" letter-spacing="-2">nomad</text>
+  <text x="79" y="278" fill="#9BAA9C" font-family="Segoe UI,Arial,sans-serif" font-size="16" font-weight="700" letter-spacing="5">LOCAL APP STUDIO</text>
+  <text x="76" y="362" fill="#F0F4EB" font-family="Segoe UI,Arial,sans-serif" font-size="58" font-weight="700" letter-spacing="-2">Construiește local.</text>
+  <text x="76" y="430" fill="#F0F4EB" font-family="Segoe UI,Arial,sans-serif" font-size="58" font-weight="700" letter-spacing="-2">Păstrează controlul.</text>
+  <text x="80" y="483" fill="#8B998D" font-family="Segoe UI,Arial,sans-serif" font-size="20">Ideile tale. Codul tău. Pe calculatorul tău.</text>
+  <rect x="805" y="155" width="270" height="270" rx="80" fill="#101713" stroke="#304237" stroke-width="2"/>
+  <path d="M875 365V215h38l117 105V215h38v150h-35L913 256v109h-38Z" fill="url(#route)"/>
+  <path d="M1026 185c3 15 10 22 25 25-15 3-22 10-25 25-3-15-10-22-25-25 15-3 22-10 25-25Z" fill="#F4FFD9"/>
+  <circle cx="1027" cy="210" r="4" fill="#101713"/>
+</svg>

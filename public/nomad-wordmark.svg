@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 480 112" fill="none">
+  <defs>
+    <linearGradient id="trail" x1="14" y1="97" x2="92" y2="19" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#B7F36B"/><stop offset="1" stop-color="#66DEC3"/>
+    </linearGradient>
+  </defs>
+  <rect x="3" y="3" width="106" height="106" rx="32" fill="#101713"/>
+  <path d="M27 86V27h15l46 42V27h15v59H88L42 44v42H27Z" fill="url(#trail)"/>
+  <path d="M83 11c2.2 12 8.2 18 20 20-11.8 2.2-17.8 8.2-20 20-2.2-11.8-8.2-17.8-20-20 11.8-2 17.8-8 20-20Z" fill="#F4FFD9"/>
+  <text x="131" y="77" fill="#EAF1E8" font-family="Segoe UI,Arial,sans-serif" font-size="68" font-weight="700" letter-spacing="-4">nomad</text>
+  <text x="136" y="101" fill="#849287" font-family="Segoe UI,Arial,sans-serif" font-size="12" font-weight="600" letter-spacing="4">BUILD LOCAL</text>
+</svg>

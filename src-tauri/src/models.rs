@@ -90,6 +90,11 @@ pub struct StreamError {
     pub message: String,
 }
 
+#[derive(Debug, Clone, Serialize)]
+pub struct StreamCancelled {
+    pub request_id: String,
+}
+
 #[derive(Debug, Clone, Deserialize)]
 pub struct ProposedChange {
     pub path: String,

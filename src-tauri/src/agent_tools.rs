@@ -34,6 +34,51 @@ fn portable(relative: &std::path::Path) -> String {
     relative.to_string_lossy().replace('\\', "/")
 }
 
+pub fn is_sensitive_path(path: &str) -> bool {
+    if path.trim().is_empty() {
+        return true;
+    }
+    if path
+        .split(['/', '\\'])
+        .map(str::to_ascii_lowercase)
+        .any(|part| {
+            matches!(
+                part.as_str(),
+                ".git" | ".ssh" | ".codex" | ".claude" | ".agents"
+            )
+        })
+    {
+        return true;
+    }
+    let name = path
+        .rsplit(['/', '\\'])
+        .next()
+        .unwrap_or_default()
+        .to_ascii_lowercase();
+    name == ".env"
+        || name.starts_with(".env.")
+        || matches!(
+            name.as_str(),
+            ".npmrc"
+                | ".pypirc"
+                | ".netrc"
+                | "credentials"
+                | "credentials.json"
+                | "secrets.json"
+                | "auth.json"
+                | "id_rsa"
+                | "id_ed25519"
+        )
+        || name.contains("secret")
+        || name == "token"
+        || name.starts_with("token.")
+        || name.starts_with("tokens.")
+        || name.contains("_token.")
+        || [".pem", ".key", ".p12", ".pfx", ".keystore"]
+            .iter()
+            .any(|suffix| name.ends_with(suffix))
+}
+
 pub fn list_files(workspace: &Workspace) -> Result<Vec<FileEntry>> {
     let mut entries = Vec::new();
     for item in WalkDir::new(workspace.root())
@@ -114,7 +159,13 @@ pub fn write_file(workspace: &Workspace, path: &str, content: &str) -> Result<()
         bail!("Conținutul depășește limita de 2 MB");
     }
     let resolved = workspace.resolve_for_write(path)?;
-    fs::write(resolved, content).context("Nu pot scrie fișierul")
+    let temp = resolved.with_extension(format!("nomad-{}.tmp", uuid::Uuid::new_v4()));
+    fs::write(&temp, content).context("Nu pot scrie fișierul temporar")?;
+    if let Err(error) = fs::rename(&temp, &resolved) {
+        let _ = fs::remove_file(&temp);
+        return Err(error).context("Nu pot înlocui fișierul");
+    }
+    Ok(())
 }
 
 pub fn apply_patch(
@@ -141,16 +192,43 @@ pub async fn run_command(
     timeout_seconds: u64,
 ) -> Result<CommandOutput> {
     validate_command(program, args)?;
-    let mut command = Command::new(command_executable(program));
+    let executable = command_executable(program);
+    let mut command;
+    #[cfg(windows)]
+    {
+        if executable.to_ascii_lowercase().ends_with(".cmd")
+            || executable.to_ascii_lowercase().ends_with(".bat")
+        {
+            let target = executable.to_string();
+            let quoted = format!("\"{}\"", target.replace('"', "\\\""));
+            let suffix = std::iter::once(quoted)
+                .chain(
+                    args.iter()
+                        .map(|value| format!("\"{}\"", value.replace('"', "\\\""))),
+                )
+                .collect::<Vec<_>>()
+                .join(" ");
+            command = Command::new("cmd.exe");
+            command
+                .args(["/d", "/s", "/c"])
+                .raw_arg(format!("\"{suffix}\""));
+            command.creation_flags(0x00000200 | 0x08000000);
+        } else {
+            command = Command::new(executable);
+            command.args(args).creation_flags(0x08000000);
+        }
+    }
+    #[cfg(not(windows))]
+    {
+        command = Command::new(executable);
+        command.args(args);
+    }
     command
-        .args(args)
         .current_dir(workspace.root())
         .stdin(Stdio::null())
         .kill_on_drop(true);
-    #[cfg(windows)]
-    command.creation_flags(0x08000000);
     let output = tokio::time::timeout(
-        Duration::from_secs(timeout_seconds.clamp(1, 120)),
+        Duration::from_secs(timeout_seconds.clamp(1, 3600)),
         command.output(),
     )
     .await
@@ -179,5 +257,24 @@ mod tests {
         fs::write(directory.path().join("a.txt"), "x x").unwrap();
         let workspace = Workspace::new(directory.path()).unwrap();
         assert!(apply_patch(&workspace, "a.txt", "x", "y").is_err());
+    }
+
+    #[test]
+    fn classifies_common_credential_files_as_sensitive() {
+        assert!(is_sensitive_path(".env.local"));
+        assert!(is_sensitive_path(".ssh/id_ed25519"));
+        assert!(is_sensitive_path("config/.claude/settings.json"));
+        assert!(!is_sensitive_path("src/tokenizer.rs"));
+        assert!(!is_sensitive_path("src/main.rs"));
+    }
+
+    #[test]
+    fn atomic_write_creates_and_replaces_files() {
+        let directory = tempfile::tempdir().unwrap();
+        let workspace = Workspace::new(directory.path()).unwrap();
+        write_file(&workspace, "one.txt", "first").unwrap();
+        write_file(&workspace, "one.txt", "second").unwrap();
+        assert_eq!(read_file(&workspace, "one.txt").unwrap(), "second");
+        assert_eq!(std::fs::read_dir(directory.path()).unwrap().count(), 1);
     }
 }

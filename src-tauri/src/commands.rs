@@ -1,4 +1,5 @@
 use crate::agent_tools;
+use crate::cli_agents::{CliAgent, CliAgentProvider, CliToolStatus};
 use crate::confirmations::ConfirmationManager;
 use crate::db::Database;
 use crate::git;
@@ -7,19 +8,96 @@ use crate::models::*;
 use crate::process_manager::ProcessManager;
 use crate::security::Workspace;
 use anyhow::{bail, Context, Result};
+use serde::Serialize;
 use std::fs;
 use std::path::Path;
 use std::sync::Arc;
 use tauri::{AppHandle, Emitter, State};
+use tauri_plugin_updater::UpdaterExt;
+use tokio::sync::Mutex as AsyncMutex;
 use uuid::Uuid;
 
 pub struct AppState {
     pub db: Arc<Database>,
     pub confirmations: Arc<ConfirmationManager>,
     pub processes: Arc<ProcessManager>,
+    pub chat_cancellations:
+        Arc<AsyncMutex<std::collections::HashMap<String, tokio::sync::oneshot::Sender<()>>>>,
 }
 
 type CommandResult<T> = std::result::Result<T, String>;
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AppUpdateInfo {
+    version: String,
+    current_version: String,
+    notes: Option<String>,
+}
+
+const UPDATER_PUBLIC_KEY: &str = "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEU1MEVCRTA1NTI3MzQ5MDAKUldRQVNYTlNCYjRPNVNQUGZGaFdjZTVqN2lxWmxCVEp3TmllQVdacy85ZXNqdkRlaHUwMDBJQnkK";
+const DEFAULT_UPDATE_ENDPOINT: Option<&str> = option_env!("NOMAD_UPDATE_ENDPOINT");
+
+fn update_endpoint(state: &AppState) -> Result<url::Url> {
+    let raw = state
+        .db
+        .get_setting(0, "update_endpoint")?
+        .filter(|value| !value.trim().is_empty())
+        .or_else(|| DEFAULT_UPDATE_ENDPOINT.map(str::to_string))
+        .unwrap_or_default();
+    if raw.trim().is_empty() {
+        bail!("Adaugă feed-ul HTTPS al release-urilor Nomad în Setări → Actualizări.");
+    }
+    let endpoint = url::Url::parse(raw.trim()).context("Feed-ul de update nu este un URL valid")?;
+    if endpoint.scheme() != "https" || endpoint.host_str().is_none() {
+        bail!("Feed-ul de update trebuie să folosească HTTPS.");
+    }
+    Ok(endpoint)
+}
+
+#[tauri::command]
+pub async fn check_for_update(
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> CommandResult<Option<AppUpdateInfo>> {
+    async {
+        let endpoint = update_endpoint(&state)?;
+        let update = app
+            .updater_builder()
+            .pubkey(UPDATER_PUBLIC_KEY)
+            .endpoints(vec![endpoint])?
+            .build()?
+            .check()
+            .await?;
+        Ok(update.map(|update| AppUpdateInfo {
+            version: update.version,
+            current_version: update.current_version,
+            notes: update.body,
+        }))
+    }
+    .await
+    .map_err(|error: anyhow::Error| error.to_string())
+}
+
+#[tauri::command]
+pub async fn install_app_update(app: AppHandle, state: State<'_, AppState>) -> CommandResult<()> {
+    let result: Result<()> = async {
+        let endpoint = update_endpoint(&state)?;
+        let update = app
+            .updater_builder()
+            .pubkey(UPDATER_PUBLIC_KEY)
+            .endpoints(vec![endpoint])?
+            .build()?
+            .check()
+            .await?
+            .ok_or_else(|| anyhow::anyhow!("Nu există o versiune nouă disponibilă"))?;
+        update.download_and_install(|_, _| {}, || {}).await?;
+        Ok(())
+    }
+    .await;
+    result.map_err(|error| error.to_string())?;
+    app.restart()
+}
 
 fn command<T>(value: Result<T>) -> CommandResult<T> {
     value.map_err(|error| error.to_string())
@@ -40,6 +118,21 @@ fn valid_project_name(name: &str) -> Result<()> {
     Ok(())
 }
 
+fn validate_local_url(value: &str) -> Result<String> {
+    let mut url = url::Url::parse(value).context("Adresa preview nu este validă")?;
+    let host = url.host_str().unwrap_or_default().to_string();
+    if !matches!(url.scheme(), "http" | "https")
+        || !(host == "localhost" || host == "127.0.0.1" || host == "[::1]")
+    {
+        bail!("Preview-ul trebuie să folosească localhost sau 127.0.0.1");
+    }
+    if host == "localhost" {
+        url.set_host(Some("127.0.0.1"))
+            .map_err(|_| anyhow::anyhow!("Adresa localhost nu poate fi normalizată"))?;
+    }
+    Ok(url.to_string())
+}
+
 fn display_path(path: &Path) -> String {
     let raw = path.to_string_lossy();
     #[cfg(windows)]
@@ -52,6 +145,17 @@ fn display_path(path: &Path) -> String {
         }
     }
     raw.into_owned()
+}
+
+fn is_inside_repository(root: &Path) -> Result<bool> {
+    let mut current = root.parent();
+    while let Some(directory) = current {
+        if directory.join(".git").exists() {
+            return Ok(true);
+        }
+        current = directory.parent();
+    }
+    Ok(false)
 }
 
 fn starter_files(root: &Path, name: &str) -> Result<()> {
@@ -107,6 +211,18 @@ createServer(async (req,res) => {
     Ok(())
 }
 
+fn ensure_starter_settings(db: &Database, project_id: i64) -> Result<()> {
+    for (key, value) in [
+        ("dev_command", "node dev-server.mjs"),
+        ("preview_url", "http://127.0.0.1:5173"),
+    ] {
+        if db.get_setting(project_id, key)?.is_none() {
+            db.set_setting(project_id, key, value)?;
+        }
+    }
+    Ok(())
+}
+
 #[tauri::command]
 pub fn request_confirmation(
     action: String,
@@ -149,6 +265,9 @@ pub fn create_project(
         if !parent.is_dir() {
             bail!("Calea părinte nu este director");
         }
+        if is_inside_repository(&parent)? {
+            bail!("Alege un director din afara unui repository Git existent pentru proiectul nou.");
+        }
         let root = parent.join(&name);
         if root.exists() {
             bail!("Directorul proiectului există deja");
@@ -156,7 +275,9 @@ pub fn create_project(
         fs::create_dir(&root)?;
         starter_files(&root, &name)?;
         let canonical = fs::canonicalize(&root)?;
-        state.db.upsert_project(&name, &display_path(&canonical))
+        let project = state.db.upsert_project(&name, &display_path(&canonical))?;
+        ensure_starter_settings(&state.db, project.id)?;
+        Ok(project)
     })())
 }
 
@@ -167,11 +288,24 @@ pub fn open_project(path: String, state: State<'_, AppState>) -> CommandResult<P
         if !root.is_dir() {
             bail!("Calea nu este un director");
         }
+        let workspace = Workspace::new(&root)?;
+        let entries = agent_tools::list_files(&workspace)?;
+        if entries.is_empty() {
+            let name = root
+                .file_name()
+                .and_then(|value| value.to_str())
+                .unwrap_or("Proiect");
+            starter_files(&root, name)?;
+        }
         let name = root
             .file_name()
             .and_then(|value| value.to_str())
             .unwrap_or("Proiect");
-        state.db.upsert_project(name, &display_path(&root))
+        let project = state.db.upsert_project(name, &display_path(&root))?;
+        if root.join("dev-server.mjs").is_file() {
+            ensure_starter_settings(&state.db, project.id)?;
+        }
+        Ok(project)
     })())
 }
 
@@ -251,6 +385,37 @@ pub fn apply_patch(
     })())
 }
 
+#[cfg(test)]
+mod input_tests {
+    use super::*;
+
+    #[test]
+    fn preview_accepts_only_loopback_urls() {
+        assert_eq!(
+            validate_local_url("http://localhost:5173").unwrap(),
+            "http://127.0.0.1:5173/"
+        );
+        assert_eq!(
+            validate_local_url("http://127.0.0.1:8080/path").unwrap(),
+            "http://127.0.0.1:8080/path"
+        );
+        assert!(validate_local_url("https://example.com").is_err());
+        assert!(validate_local_url("file:///C:/secret").is_err());
+    }
+
+    #[test]
+    fn settings_validate_values_and_reject_unknown_keys() {
+        assert!(validate_app_setting("workflow_instructions", "Propune schimbări mici").is_ok());
+        assert!(validate_app_setting("workflow_timeout_seconds", "120").is_ok());
+        assert!(validate_app_setting("workflow_timeout_seconds", "99999").is_err());
+        assert!(validate_app_setting("mcp_servers_json", "[]").is_ok());
+        assert!(validate_app_setting("mcp_servers_json", "{}").is_err());
+        assert!(validate_app_setting("confirm_file_writes", "false").is_ok());
+        assert!(validate_app_setting("confirm_file_writes", "yes").is_err());
+        assert!(validate_app_setting("unknown_setting", "value").is_err());
+    }
+}
+
 #[tauri::command]
 pub async fn run_command(
     project_id: i64,
@@ -260,7 +425,10 @@ pub async fn run_command(
     confirmation_token: String,
     state: State<'_, AppState>,
 ) -> CommandResult<CommandOutput> {
-    let action = format!("command:run:{project_id}:{program}:{}", args.join(" "));
+    let action = format!(
+        "command:run:{project_id}:{program}:{}",
+        serde_json::to_string(&args).map_err(|error| error.to_string())?
+    );
     if let Err(error) = state.confirmations.consume(&confirmation_token, &action) {
         return Err(error.to_string());
     }
@@ -268,7 +436,14 @@ pub async fn run_command(
         Ok(value) => value,
         Err(error) => return Err(error.to_string()),
     };
-    command(agent_tools::run_command(&workspace, &program, &args, timeout_seconds).await)
+    let configured_timeout = state
+        .db
+        .get_setting(0, "tool_command_timeout")
+        .map_err(|error| error.to_string())?
+        .and_then(|value| value.parse::<u64>().ok())
+        .unwrap_or(120);
+    let effective_timeout = timeout_seconds.min(configured_timeout).clamp(5, 3600);
+    command(agent_tools::run_command(&workspace, &program, &args, effective_timeout).await)
 }
 
 #[tauri::command]
@@ -281,12 +456,26 @@ pub fn list_messages(
     project_id: i64,
     state: State<'_, AppState>,
 ) -> CommandResult<Vec<ChatMessage>> {
-    command(state.db.list_messages(project_id, 100))
+    command((|| {
+        state.db.get_project(project_id)?;
+        state.db.list_messages(project_id, 100)
+    })())
+}
+
+#[tauri::command]
+pub fn list_session_messages(
+    session_id: i64,
+    state: State<'_, AppState>,
+) -> CommandResult<Vec<ChatMessage>> {
+    command(state.db.list_session_messages(session_id, 100))
 }
 
 #[tauri::command]
 pub fn list_proposals(project_id: i64, state: State<'_, AppState>) -> CommandResult<Vec<Proposal>> {
-    command(state.db.list_proposals(project_id))
+    command((|| {
+        state.db.get_project(project_id)?;
+        state.db.list_proposals(project_id)
+    })())
 }
 
 #[tauri::command]
@@ -295,6 +484,7 @@ pub fn create_manual_proposal(
     path: String,
     content: String,
     summary: String,
+    expected_original: String,
     state: State<'_, AppState>,
 ) -> CommandResult<Proposal> {
     command((|| {
@@ -305,6 +495,9 @@ pub fn create_manual_proposal(
         } else {
             String::new()
         };
+        if original != expected_original {
+            bail!("Fișierul s-a schimbat pe disc. Reîncarcă-l înainte să propui modificarea.");
+        }
         state
             .db
             .create_proposal(project_id, &path, &original, &content, &summary)
@@ -313,7 +506,14 @@ pub fn create_manual_proposal(
 
 #[tauri::command]
 pub fn reject_proposal(proposal_id: i64, state: State<'_, AppState>) -> CommandResult<Proposal> {
-    command(state.db.update_proposal_status(proposal_id, "rejected"))
+    command((|| {
+        let proposal = state.db.get_proposal(proposal_id)?;
+        let _ = workspace(&state.db, proposal.project_id)?;
+        if proposal.status != "pending" {
+            bail!("Propunerea nu mai este în așteptarea unei decizii");
+        }
+        state.db.update_proposal_status(proposal_id, "rejected")
+    })())
 }
 
 #[tauri::command]
@@ -366,6 +566,7 @@ fn extract_change(text: &str) -> Result<Option<ProposedChange>> {
 #[tauri::command]
 pub fn chat_stream(
     project_id: i64,
+    session_id: i64,
     prompt: String,
     active_path: Option<String>,
     app: AppHandle,
@@ -374,17 +575,54 @@ pub fn chat_stream(
     if prompt.trim().is_empty() {
         return Err("Mesajul este gol".into());
     }
-    let provider = OpenAiProvider::from_keychain().map_err(|error| error.to_string())?;
+    if prompt.len() > 40_000 {
+        return Err("Mesajul depășește limita de 40 KB".into());
+    }
+    let provider_kind = state
+        .db
+        .get_setting(0, "ai_provider")
+        .map_err(|error| error.to_string())?
+        .unwrap_or_else(|| "api".into());
+    let provider: Box<dyn LlmProvider> = match provider_kind.as_str() {
+        "claude-code" => Box::new(CliAgentProvider(CliAgent::ClaudeCode)),
+        "codex" => Box::new(CliAgentProvider(CliAgent::Codex)),
+        "api" => {
+            let endpoint = state
+                .db
+                .get_setting(0, "ai_endpoint")
+                .map_err(|error| error.to_string())?;
+            Box::new(
+                OpenAiProvider::from_keychain(endpoint.as_deref())
+                    .map_err(|error| error.to_string())?,
+            )
+        }
+        _ => return Err("Providerul AI selectat nu este valid".into()),
+    };
     let workspace = workspace(&state.db, project_id).map_err(|error| error.to_string())?;
+    let (session_project, _) = state
+        .db
+        .get_chat_session(session_id)
+        .map_err(|error| error.to_string())?;
+    if session_project != project_id {
+        return Err("Sesiunea nu aparține proiectului".into());
+    }
     state
         .db
-        .insert_message(project_id, "user", prompt.trim())
+        .insert_session_message(session_id, "user", prompt.trim())
         .map_err(|error| error.to_string())?;
     let history = state
         .db
-        .list_messages(project_id, 16)
+        .list_session_messages(session_id, 16)
         .map_err(|error| error.to_string())?;
     let files = agent_tools::list_files(&workspace).map_err(|error| error.to_string())?;
+    if active_path
+        .as_deref()
+        .is_some_and(agent_tools::is_sensitive_path)
+    {
+        return Err(
+            "Fișierele cu secrete sau credențiale nu pot fi trimise unui provider AI".into(),
+        );
+    }
     let file_context = active_path
         .as_deref()
         .map(|path| {
@@ -401,6 +639,7 @@ pub fn chat_stream(
     let project_map = files
         .iter()
         .take(250)
+        .filter(|entry| !agent_tools::is_sensitive_path(&entry.path))
         .map(|entry| entry.path.as_str())
         .collect::<Vec<_>>()
         .join("\n");
@@ -409,6 +648,12 @@ pub fn chat_stream(
         .get_setting(0, "openai_model")
         .map_err(|error| error.to_string())?
         .unwrap_or_else(|| "gpt-6-astra".into());
+    let workflow_instructions = state
+        .db
+        .get_setting(0, "workflow_instructions")
+        .map_err(|error| error.to_string())?
+        .filter(|value| !value.trim().is_empty())
+        .unwrap_or_default();
     let instructions = format!(
         r#"Ești agentul de programare din Nomad, un mediu local-first. Răspunde concis în limba utilizatorului.
 În acest MVP poți analiza contextul și propune cel mult o schimbare de fișier. Nu pretinde că ai executat unelte sau comenzi.
@@ -417,10 +662,14 @@ Când este necesară o modificare, încheie răspunsul cu exact un bloc pe o sin
 Calea trebuie să fie relativă la proiect. Nu folosi .., căi absolute sau symlink-uri. Nu include blocul dacă utilizatorul cere doar explicații.
 Uneltele backend disponibile după confirmarea utilizatorului sunt: {}.
 
+Instrucțiuni personale ale utilizatorului pentru acest agent:
+{}
+
 Fișiere proiect:
 {}{}
 "#,
         agent_tools::TOOL_NAMES.join(", "),
+        workflow_instructions,
         project_map,
         file_context
     );
@@ -434,11 +683,18 @@ Fișiere proiect:
                 content: message.content,
             })
             .collect(),
+        workspace: Some(workspace.root().to_path_buf()),
     };
     let request_id = Uuid::new_v4().to_string();
     let returned_id = request_id.clone();
     let db = state.db.clone();
     let app_handle = app.clone();
+    let (cancel_tx, mut cancel_rx) = tokio::sync::oneshot::channel::<()>();
+    state
+        .chat_cancellations
+        .blocking_lock()
+        .insert(request_id.clone(), cancel_tx);
+    let cancellations = state.chat_cancellations.clone();
     tauri::async_runtime::spawn(async move {
         let (delta_tx, mut delta_rx) = tokio::sync::mpsc::unbounded_channel::<String>();
         let delta_app = app_handle.clone();
@@ -454,7 +710,14 @@ Fișiere proiect:
                 );
             }
         });
-        let response = provider.stream(request, delta_tx).await;
+        let response = tokio::select! {
+            _ = &mut cancel_rx => {
+                let _ = app_handle.emit("chat://cancelled", StreamCancelled { request_id: request_id.clone() });
+                cancellations.lock().await.remove(&request_id);
+                return;
+            }
+            result = provider.stream(request, delta_tx) => result,
+        };
         let _ = forwarder.await;
         match response {
             Ok(content) => {
@@ -476,7 +739,7 @@ Fișiere proiect:
                     } else {
                         None
                     };
-                    let message = db.insert_message(project_id, "assistant", &content)?;
+                    let message = db.insert_session_message(session_id, "assistant", &content)?;
                     Ok((message, proposal))
                 })();
                 match result {
@@ -484,7 +747,7 @@ Fișiere proiect:
                         let _ = app_handle.emit(
                             "chat://done",
                             StreamDone {
-                                request_id,
+                                request_id: request_id.clone(),
                                 message,
                                 proposal,
                             },
@@ -494,7 +757,7 @@ Fișiere proiect:
                         let _ = app_handle.emit(
                             "chat://error",
                             StreamError {
-                                request_id,
+                                request_id: request_id.clone(),
                                 message: error.to_string(),
                             },
                         );
@@ -505,14 +768,58 @@ Fișiere proiect:
                 let _ = app_handle.emit(
                     "chat://error",
                     StreamError {
-                        request_id,
+                        request_id: request_id.clone(),
                         message: error.to_string(),
                     },
                 );
             }
         }
+        cancellations.lock().await.remove(&request_id);
     });
     Ok(returned_id)
+}
+
+#[tauri::command]
+pub fn list_chat_sessions(
+    project_id: i64,
+    state: State<'_, AppState>,
+) -> CommandResult<Vec<serde_json::Value>> {
+    command((|| {
+        state.db.get_project(project_id)?;
+        state.db.list_chat_sessions(project_id)
+    })())
+}
+
+#[tauri::command]
+pub fn create_chat_session(
+    project_id: i64,
+    title: String,
+    state: State<'_, AppState>,
+) -> CommandResult<i64> {
+    command((|| {
+        state.db.get_project(project_id)?;
+        Ok(state.db.create_chat_session(project_id, &title)?)
+    })())
+}
+
+#[tauri::command]
+pub fn get_latest_session_id(
+    project_id: i64,
+    state: State<'_, AppState>,
+) -> CommandResult<Option<i64>> {
+    command((|| {
+        state.db.get_project(project_id)?;
+        state.db.latest_chat_session_id(project_id)
+    })())
+}
+
+#[tauri::command]
+pub async fn cancel_chat(request_id: String, state: State<'_, AppState>) -> CommandResult<()> {
+    let sender = state.chat_cancellations.lock().await.remove(&request_id);
+    if let Some(sender) = sender {
+        let _ = sender.send(());
+    }
+    Ok(())
 }
 
 #[tauri::command]
@@ -521,13 +828,174 @@ pub fn save_api_key(api_key: String) -> CommandResult<()> {
 }
 
 #[tauri::command]
+pub fn delete_api_key() -> CommandResult<()> {
+    command(OpenAiProvider::delete_key())
+}
+
+#[tauri::command]
 pub fn has_api_key() -> bool {
     OpenAiProvider::has_key()
 }
 
 #[tauri::command]
+pub fn detect_ai_cli_tools() -> Vec<CliToolStatus> {
+    crate::cli_agents::statuses()
+}
+
+const APP_SETTING_KEYS: &[&str] = &[
+    "openai_model",
+    "ai_endpoint",
+    "ai_provider",
+    "theme",
+    "ui_density",
+    "profile_name",
+    "update_endpoint",
+    "anonymous_telemetry",
+    "language",
+    "workflow_instructions",
+    "workflow_timeout_seconds",
+    "workflow_auto_snapshot",
+    "workflow_run_checks",
+    "mcp_servers_json",
+    "tool_command_timeout",
+    "mcp_enabled",
+    "mcp_network_access",
+    "cloud_api_url",
+    "deploy_provider",
+    "deploy_project_id",
+    "cloud_sync_enabled",
+    "allowed_command_prefixes",
+    "confirm_file_writes",
+    "confirm_shell_commands",
+    "allow_network_tools",
+    "default_dev_command",
+    "default_preview_url",
+    "external_database_host",
+    "verbose_logs",
+    "experiment_notes",
+    "experiment_multi_agent",
+    "experiment_security_review",
+    "experiment_templates",
+    "support_contact",
+    "support_notes",
+    "attach_logs_to_support",
+];
+
+fn validate_app_setting(key: &str, value: &str) -> Result<()> {
+    if !APP_SETTING_KEYS.contains(&key) {
+        bail!("Setarea aplicației nu este permisă");
+    }
+    if value.len() > 64 * 1024 {
+        bail!("Valoarea setării este prea lungă (maximum 64 KB)");
+    }
+    let boolean_setting = matches!(
+        key,
+        "anonymous_telemetry"
+            | "workflow_auto_snapshot"
+            | "workflow_run_checks"
+            | "mcp_enabled"
+            | "mcp_network_access"
+            | "cloud_sync_enabled"
+            | "confirm_file_writes"
+            | "confirm_shell_commands"
+            | "allow_network_tools"
+            | "verbose_logs"
+            | "experiment_multi_agent"
+            | "experiment_security_review"
+            | "experiment_templates"
+            | "attach_logs_to_support"
+    );
+    if boolean_setting && !matches!(value, "true" | "false") {
+        bail!("Valoarea acestei setări trebuie să fie true sau false");
+    }
+    match key {
+        "openai_model" if value.trim().is_empty() || value.len() > 100 => {
+            bail!("Modelul trebuie să aibă 1–100 caractere");
+        }
+        "theme" if !matches!(value, "forest" | "ocean" | "violet") => {
+            bail!("Tema selectată nu este permisă");
+        }
+        "ui_density" if !matches!(value, "comfortable" | "compact") => {
+            bail!("Densitatea selectată nu este permisă");
+        }
+        "ai_endpoint" if !value.trim().is_empty() => {
+            crate::llm::chat_completions_endpoint(value.trim())?;
+        }
+        "ai_provider" if !matches!(value, "api" | "claude-code" | "codex") => {
+            bail!("Providerul AI selectat nu este permis");
+        }
+        "profile_name" if value.trim().is_empty() || value.len() > 80 => {
+            bail!("Numele profilului trebuie să aibă 1–80 caractere");
+        }
+        "update_endpoint" if !value.trim().is_empty() => {
+            let endpoint =
+                url::Url::parse(value.trim()).context("Feed-ul de update nu este un URL valid")?;
+            if endpoint.scheme() != "https" || endpoint.host_str().is_none() {
+                bail!("Feed-ul de update trebuie să folosească HTTPS.");
+            }
+        }
+        "cloud_api_url" if !value.trim().is_empty() => {
+            let endpoint =
+                url::Url::parse(value.trim()).context("Adresa API cloud nu este validă")?;
+            let host = endpoint.host_str().unwrap_or_default();
+            if !matches!(endpoint.scheme(), "https" | "http")
+                || (endpoint.scheme() != "https"
+                    && !matches!(host, "localhost" | "127.0.0.1" | "[::1]"))
+            {
+                bail!(
+                    "API-ul cloud trebuie să folosească HTTPS (HTTP este permis doar pe localhost)"
+                );
+            }
+        }
+        "mcp_servers_json" if !value.trim().is_empty() => {
+            let registry: serde_json::Value =
+                serde_json::from_str(value).context("Registry-ul MCP trebuie să fie JSON valid")?;
+            if !registry.is_array() || registry.as_array().is_some_and(|items| items.len() > 100) {
+                bail!("Registry-ul MCP trebuie să fie o listă JSON cu maximum 100 de servere");
+            }
+        }
+        "workflow_timeout_seconds" | "tool_command_timeout" if !value.trim().is_empty() => {
+            let seconds = value
+                .parse::<u64>()
+                .context("Timeout-ul trebuie să fie un număr de secunde")?;
+            if !(5..=3600).contains(&seconds) {
+                bail!("Timeout-ul trebuie să fie între 5 și 3600 de secunde");
+            }
+        }
+        "language" if !matches!(value, "ro-RO" | "en-US") => {
+            bail!("Limba selectată nu este disponibilă");
+        }
+        "workflow_instructions" if value.len() > 16 * 1024 => {
+            bail!("Instrucțiunile agentului nu pot depăși 16 KB");
+        }
+        "default_preview_url" if !value.trim().is_empty() => {
+            validate_local_url(value.trim())?;
+        }
+        "external_database_host"
+            if value.contains('@') || value.contains('/') || value.contains(':') =>
+        {
+            bail!("Introdu doar numele gazdei, fără utilizator, parolă sau URL");
+        }
+        _ => {}
+    }
+    Ok(())
+}
+
+#[tauri::command]
 pub fn get_app_setting(key: String, state: State<'_, AppState>) -> CommandResult<Option<String>> {
-    command(state.db.get_setting(0, &key))
+    command((|| {
+        if !APP_SETTING_KEYS.contains(&key.as_str()) {
+            bail!("Setarea aplicației nu este permisă");
+        }
+        let value = state.db.get_setting(0, &key)?;
+        if key == "update_endpoint" {
+            Ok(value
+                .filter(|endpoint| !endpoint.trim().is_empty())
+                .or_else(|| DEFAULT_UPDATE_ENDPOINT.map(str::to_string)))
+        } else {
+            Ok(value)
+        }
+    })())
 }
 
 #[tauri::command]
@@ -536,7 +1004,10 @@ pub fn set_app_setting(
     value: String,
     state: State<'_, AppState>,
 ) -> CommandResult<()> {
-    command(state.db.set_setting(0, &key, &value))
+    command((|| {
+        validate_app_setting(&key, &value)?;
+        state.db.set_setting(0, &key, &value)
+    })())
 }
 
 #[tauri::command]
@@ -545,17 +1016,54 @@ pub fn get_project_setting(
     key: String,
     state: State<'_, AppState>,
 ) -> CommandResult<Option<String>> {
-    command(state.db.get_setting(project_id, &key))
+    command((|| {
+        state.db.get_project(project_id)?;
+        let value = state.db.get_setting(project_id, &key)?;
+        if key == "preview_url" {
+            value.map(|url| validate_local_url(&url)).transpose()
+        } else {
+            Ok(value)
+        }
+    })())
 }
 
 #[tauri::command]
 pub fn set_project_setting(
     project_id: i64,
     key: String,
-    value: String,
+    mut value: String,
     state: State<'_, AppState>,
 ) -> CommandResult<()> {
-    command(state.db.set_setting(project_id, &key, &value))
+    command((|| {
+        state.db.get_project(project_id)?;
+        if !matches!(key.as_str(), "dev_command" | "preview_url") {
+            bail!("Setarea proiectului nu este permisă");
+        }
+        if value.len() > 4_000 {
+            bail!("Valoarea setării este prea lungă");
+        }
+        if key == "dev_command" {
+            let parts = crate::process_manager::split_command_line(&value)?;
+            if parts.is_empty() {
+                bail!("Comanda dev-server este goală");
+            }
+            crate::process_manager::validate_command(&parts[0], &parts[1..])?;
+        }
+        if key == "preview_url" {
+            value = validate_local_url(&value)?;
+        }
+        state.db.set_setting(project_id, &key, &value)
+    })())
+}
+
+#[tauri::command]
+pub fn validate_preview_url(value: String) -> CommandResult<String> {
+    command(validate_local_url(&value))
+}
+
+#[tauri::command]
+pub fn parse_command_line(value: String) -> CommandResult<Vec<String>> {
+    command(crate::process_manager::split_command_line(&value))
 }
 
 #[tauri::command]
@@ -566,13 +1074,13 @@ pub async fn start_dev_server(
     confirmation_token: String,
     state: State<'_, AppState>,
 ) -> CommandResult<ProcessStatus> {
+    let command_args = std::iter::once(program.clone())
+        .chain(args.clone())
+        .collect::<Vec<_>>();
     let action = format!(
-        "process:start:{project_id}:{program}{}",
-        if args.is_empty() {
-            String::new()
-        } else {
-            format!(" {}", args.join(" "))
-        }
+        "process:start:{project_id}:{}:{}",
+        program,
+        serde_json::to_string(&command_args).map_err(|error| error.to_string())?
     );
     if let Err(error) = state.confirmations.consume(&confirmation_token, &action) {
         return Err(error.to_string());
@@ -651,6 +1159,38 @@ mod tests {
         assert_eq!(change.content, "hello");
     }
 
+    #[test]
+    fn starter_defaults_use_direct_node_and_loopback_ip_without_overwriting_user_settings() {
+        let directory = tempfile::tempdir().unwrap();
+        let db = Database::open(&directory.path().join("nomad.sqlite3")).unwrap();
+        let project = db
+            .upsert_project("starter", directory.path().to_str().unwrap())
+            .unwrap();
+        ensure_starter_settings(&db, project.id).unwrap();
+        assert_eq!(
+            db.get_setting(project.id, "dev_command")
+                .unwrap()
+                .as_deref(),
+            Some("node dev-server.mjs")
+        );
+        assert_eq!(
+            db.get_setting(project.id, "preview_url")
+                .unwrap()
+                .as_deref(),
+            Some("http://127.0.0.1:5173")
+        );
+
+        db.set_setting(project.id, "dev_command", "npm run custom")
+            .unwrap();
+        ensure_starter_settings(&db, project.id).unwrap();
+        assert_eq!(
+            db.get_setting(project.id, "dev_command")
+                .unwrap()
+                .as_deref(),
+            Some("npm run custom")
+        );
+    }
+
     #[cfg(windows)]
     #[test]
     fn removes_windows_verbatim_prefix_for_display() {
@@ -659,5 +1199,16 @@ mod tests {
             display_path(Path::new(r"\\?\UNC\server\share")),
             r"\\server\share"
         );
+    }
+
+    #[test]
+    fn detects_nested_repository_parent() {
+        let directory = tempfile::tempdir().unwrap();
+        let repository = directory.path().join("repo");
+        let nested = repository.join("nested");
+        fs::create_dir_all(&nested).unwrap();
+        fs::create_dir(repository.join(".git")).unwrap();
+        assert!(is_inside_repository(&nested).unwrap());
+        assert!(!is_inside_repository(directory.path()).unwrap());
     }
 }
