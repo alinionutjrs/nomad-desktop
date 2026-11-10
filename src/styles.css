@@ -139,6 +139,9 @@ button { color: inherit; }
 .preview-view { display: flex; flex-direction: column; }
 .preview-content { min-height: 0; flex: 1; display: grid; grid-template-rows: minmax(160px, 1fr) 155px; }
 .preview-content iframe { width: 100%; height: 100%; border: 0; background: white; }
+.preview-placeholder { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; min-height: 160px; color: #9cad9d; text-align: center; background: #0c140e; }
+.preview-placeholder strong { color: #e3eee1; font-size: 16px; }
+.preview-placeholder span { max-width: 340px; font-size: 12px; line-height: 1.5; }
 .logs { min-height: 0; border-top: 1px solid var(--line); background: #080a07; }
 .logs-title { height: 26px; display: flex; align-items: center; padding: 0 12px; color: #6f7869; text-transform: uppercase; font-size: 8px; font-weight: 700; letter-spacing: .1em; border-bottom: 1px solid #161b15; }
 .logs pre { height: calc(100% - 26px); margin: 0; overflow: auto; padding: 8px 12px; color: #889382; font: 9px/1.5 'DM Mono', monospace; }
@@ -184,6 +187,11 @@ button { color: inherit; }
 .setting-toggle span strong { color: #dbe4d1; font-size: 10px; }
 .setting-toggle span small { max-width: 520px; color: #87917f; font-size: 9px; line-height: 1.5; font-weight: 400; }
 .settings-card label.setting-toggle input { flex: 0 0 auto; width: 16px; height: 16px; accent-color: var(--accent); }
+.settings-status { display: flex; align-items: center; justify-content: space-between; gap: 18px; padding: 13px 0; border-bottom: 1px solid var(--line-soft); }
+.settings-status > span { display: grid; min-width: 0; gap: 5px; }
+.settings-status strong { color: #e1ebe0; font-size: 13px; }
+.settings-status small { color: #9dad9e; font-size: 12px; line-height: 1.4; }
+.settings-status > b { flex: 0 0 auto; color: var(--accent); font-size: 12px; }
 .inline-setting { display: flex; gap: 8px; }
 .inline-setting input { flex: 1; min-width: 0; }
 .inline-setting button { padding: 8px 12px; color: #12160f; font-size: 10px; font-weight: 700; border: 1px solid var(--accent); border-radius: 7px; background: var(--accent); cursor: pointer; }

@@ -18,7 +18,7 @@ Acest ghid descrie cum să obții instalatoarele, să le publici și să folose�
 1. Creează un repository GitHub privat sau public și urcă folderul proiectului. Pentru colaborare sau distribuție publică, folosește un repository public.
 2. În tabul **Actions**, activează GitHub Actions dacă GitHub îl solicită.
 3. Deschide workflow-ul **Build desktop installers** și apasă **Run workflow**. Workflow-ul produce artifacte care pot fi descărcate din pagina run-ului; artifactele sunt temporare și nu reprezintă o pagină permanentă de download.
-4. Pentru o pagină permanentă, creează și publică un tag de versiune, de exemplu `v0.1.1`. Workflow-ul atașează instalatoarele la GitHub Release.
+4. Pentru o pagină permanentă, creează și publică un tag de versiune, de exemplu `v0.1.2`. Workflow-ul atașează instalatoarele la GitHub Release.
 5. După ce toate job-urile termină cu succes, deschide **Releases** și descarcă asset-urile pentru platformele dorite.
 
 Comenzi Git uzuale pentru următoarea versiune (rulează din folderul repository-ului):
@@ -27,8 +27,8 @@ Comenzi Git uzuale pentru următoarea versiune (rulează din folderul repository
 git add .
 git commit -m "Prepare Nomad release"
 git push
-git tag v0.1.1
-git push origin v0.1.1
+git tag v0.1.2
+git push origin v0.1.2
 ```
 
 Schimbă versiunea în `package.json`, `src-tauri/Cargo.toml` și `src-tauri/tauri.conf.json` înainte de fiecare release. Păstrează cheia de semnare existentă; utilizatorii vor accepta doar pachetele semnate de cheia publică inclusă deja în aplicație.

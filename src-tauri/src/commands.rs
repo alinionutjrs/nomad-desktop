@@ -240,6 +240,8 @@ fn starter_files(root: &Path, name: &str) -> Result<()> {
 import { readFile, stat } from 'node:fs/promises';
 import { extname, isAbsolute, relative, resolve } from 'node:path';
 const root = process.cwd();
+const port = Number(process.argv[2] || 5173);
+if (!Number.isInteger(port) || port < 1024 || port > 65535) throw new Error('Invalid preview port');
 const types = {'.html':'text/html; charset=utf-8','.css':'text/css; charset=utf-8','.js':'text/javascript; charset=utf-8','.json':'application/json'};
 createServer(async (req,res) => {
   try {
@@ -253,7 +255,7 @@ createServer(async (req,res) => {
     res.writeHead(200, {'content-type': types[extname(file)] || 'application/octet-stream', 'cache-control':'no-store'});
     res.end(await readFile(file));
   } catch { res.writeHead(404); res.end('Not found'); }
-}).listen(5173, '127.0.0.1', () => console.log('Preview: http://localhost:5173'));
+}).listen(port, '127.0.0.1', () => console.log(`Preview: http://127.0.0.1:${port}`));
 "#,
     )?;
     Ok(())
@@ -720,7 +722,9 @@ fn extract_tool_call(text: &str) -> Result<Option<AgentToolCall>> {
 
 fn execute_agent_read_tool(workspace: &Workspace, call: &AgentToolCall) -> Result<String> {
     let result = match call.name.as_str() {
-        "list_files" => serde_json::to_string(&agent_tools::list_files(workspace)?)?,
+        "list_files" => serde_json::to_string(&agent_tools::list_files(workspace)?
+            .into_iter().filter(|entry| !agent_tools::is_sensitive_path(&entry.path))
+            .collect::<Vec<_>>())?,
         "read_file" => {
             let path = call.arguments.get("path").and_then(serde_json::Value::as_str)
                 .ok_or_else(|| anyhow::anyhow!("read_file necesită path"))?;
@@ -732,7 +736,9 @@ fn execute_agent_read_tool(workspace: &Workspace, call: &AgentToolCall) -> Resul
         "search_files" => {
             let query = call.arguments.get("query").and_then(serde_json::Value::as_str)
                 .ok_or_else(|| anyhow::anyhow!("search_files necesită query"))?;
-            serde_json::to_string(&agent_tools::search_files(workspace, query)?)?
+            serde_json::to_string(&agent_tools::search_files(workspace, query)?
+                .into_iter().filter(|entry| !agent_tools::is_sensitive_path(&entry.path))
+                .collect::<Vec<_>>())?
         }
         "git_diff" => git::diff(workspace.root())?,
         _ => bail!("Unealta {} nu este activată în Agent Mode", call.name),
@@ -1429,6 +1435,28 @@ pub async fn start_dev_server(
         Ok(value) => value,
         Err(error) => return Err(error.to_string()),
     };
+    if let Ok(Some(preview)) = state.db.get_setting(project_id, "preview_url") {
+        if let Ok(url) = url::Url::parse(&preview) {
+            if let (Some(host), Some(port)) = (url.host_str(), url.port_or_known_default()) {
+                let ip = if host.eq_ignore_ascii_case("localhost") {
+                    Some(std::net::IpAddr::V4(std::net::Ipv4Addr::LOCALHOST))
+                } else {
+                    host.trim_matches(['[', ']']).parse::<std::net::IpAddr>().ok()
+                };
+                if let Some(ip) = ip {
+                    let address = std::net::SocketAddr::new(ip, port);
+                    if std::net::TcpStream::connect_timeout(
+                        &address,
+                        std::time::Duration::from_millis(300),
+                    ).is_ok() {
+                        return Err(format!(
+                            "Portul {port} este deja folosit. Oprește serverul existent sau alege alt port pentru acest proiect."
+                        ));
+                    }
+                }
+            }
+        }
+    }
     command(
         state
             .processes
@@ -1515,6 +1543,17 @@ mod tests {
             arguments: serde_json::json!({"path": ".env.local"}),
         };
         assert!(execute_agent_read_tool(&workspace, &secret).is_err());
+        std::fs::write(directory.path().join(".env.local"), "PRIVATE=1").unwrap();
+        std::fs::write(directory.path().join("visible.txt"), "PRIVATE=public note").unwrap();
+        for call in [
+            AgentToolCall { name: "list_files".into(), arguments: serde_json::json!({}) },
+            AgentToolCall { name: "search_files".into(), arguments: serde_json::json!({"query": "PRIVATE"}) },
+        ] {
+            let result = execute_agent_read_tool(&workspace, &call).unwrap();
+            assert!(!result.contains(".env.local"));
+            assert!(!result.contains("PRIVATE=1"));
+            assert!(result.contains("visible.txt"));
+        }
     }
 
     #[test]

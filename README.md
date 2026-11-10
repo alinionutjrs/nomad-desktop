@@ -12,7 +12,7 @@ Nomad este o aplicație desktop local-first pentru construirea și editarea proi
 - editor simplu care transformă salvarea într-o propunere aprobabilă și detectează schimbările concurente;
 - conversații persistente, sesiuni multiple și anulare stream;
 - dev-server pornit ca proces copil, loguri limitate, timeout pentru comenzile one-shot și oprirea arborelui de procese pe Windows;
-- preview localhost validat și iframe izolat;
+- preview localhost validat și iframe izolat, afișat doar cât procesul proiectului rulează;
 - diff local față de ultimul snapshot;
 - snapshot-uri Git și rollback confirmat;
 - export de proiect într-un folder ales, cu cheile, fișierele `.env`, directoarele Git și artefactele de build omise;
@@ -62,7 +62,7 @@ La prima pornire:
 1. Deschide **Setări → Furnizori AI**. Alege API compatibil OpenAI, Claude Code CLI sau Codex CLI. Pentru serverele locale fără autentificare poți lăsa cheia goală.
 2. Creează un proiect într-un director părinte sau deschide un folder existent.
 3. Selectează un fișier și discută cu agentul. O modificare propusă nu atinge discul până la **Acceptă**.
-4. Pentru proiecte existente configurează comanda dev-server și adresa localhost. Proiectul starter inclus folosește `node dev-server.mjs` și `http://127.0.0.1:5173`.
+4. Pentru proiecte existente configurează comanda dev-server și adresa localhost. Proiectul starter inclus folosește `node dev-server.mjs` și `http://127.0.0.1:5173`. Dacă portul este ocupat, alege altul și pornește cu `node dev-server.mjs 5174`, respectiv `http://127.0.0.1:5174`.
 
 Pentru utilizare gratuită, poți alege un model marcat gratuit în OpenRouter (cheia OpenRouter rămâne necesară) sau poți instala Ollama și folosi `http://localhost:11434/v1` fără cheie; descarcă separat un model local din Ollama. Claude Code/Codex pot folosi login-ul lor existent, dacă planul/contul tău permite folosirea CLI-ului.
 

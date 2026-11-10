@@ -23,15 +23,15 @@ jobs:
             artifact: linux-x64
             target: x86_64-unknown-linux-gnu
             rust-targets: x86_64-unknown-linux-gnu
-          - platform: macos-14
+          - platform: macos-15
             artifact: macos-apple-silicon
             target: aarch64-apple-darwin
             rust-targets: aarch64-apple-darwin
-          - platform: macos-14
+          - platform: macos-15-intel
             artifact: macos-intel
             target: x86_64-apple-darwin
             rust-targets: x86_64-apple-darwin
-          - platform: macos-14
+          - platform: macos-15-intel
             artifact: macos-universal
             target: universal-apple-darwin
             rust-targets: aarch64-apple-darwin,x86_64-apple-darwin
