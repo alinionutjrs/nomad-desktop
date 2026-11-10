@@ -55,6 +55,8 @@ npm install
 npm run tauri dev
 ```
 
+Pentru modificări vizuale rapide, păstrează `npm run tauri dev` pornit. Vite actualizează automat interfața când se schimbă fișierele din `src/`; modificările backendului Rust din `src-tauri/src/` repornesc aplicația după recompilare. Verifică fluxurile care folosesc fișiere, chei, procese sau SQLite în fereastra Tauri, deoarece pagina Vite deschisă singură în browser nu are acces la comenzile Rust.
+
 Pachete locale se construiesc cu `npm run build:windows`, `npm run build:linux`, `npm run build:macos:apple` sau `npm run build:macos:intel` pe sistemul/runner-ul potrivit. Tauri pune instalatoarele în `src-tauri/target/<target>/release/bundle/`.
 
 La prima pornire:
