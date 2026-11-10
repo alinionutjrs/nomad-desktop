@@ -699,6 +699,47 @@ fn extract_change(text: &str) -> Result<Option<ProposedChange>> {
     ))
 }
 
+#[derive(Debug, Deserialize)]
+struct AgentToolCall {
+    name: String,
+    #[serde(default)]
+    arguments: serde_json::Value,
+}
+
+fn extract_tool_call(text: &str) -> Result<Option<AgentToolCall>> {
+    let Some(start) = text.find("<nomad-tool>") else {
+        return Ok(None);
+    };
+    let json_start = start + "<nomad-tool>".len();
+    let end = text[json_start..]
+        .find("</nomad-tool>")
+        .map(|value| json_start + value)
+        .ok_or_else(|| anyhow::anyhow!("Cererea de unealtă este incompletă"))?;
+    Ok(Some(serde_json::from_str(&text[json_start..end])?))
+}
+
+fn execute_agent_read_tool(workspace: &Workspace, call: &AgentToolCall) -> Result<String> {
+    let result = match call.name.as_str() {
+        "list_files" => serde_json::to_string(&agent_tools::list_files(workspace)?)?,
+        "read_file" => {
+            let path = call.arguments.get("path").and_then(serde_json::Value::as_str)
+                .ok_or_else(|| anyhow::anyhow!("read_file necesită path"))?;
+            if agent_tools::is_sensitive_path(path) {
+                bail!("Fișierele cu secrete nu pot fi citite de agent");
+            }
+            agent_tools::read_file(workspace, path)?
+        }
+        "search_files" => {
+            let query = call.arguments.get("query").and_then(serde_json::Value::as_str)
+                .ok_or_else(|| anyhow::anyhow!("search_files necesită query"))?;
+            serde_json::to_string(&agent_tools::search_files(workspace, query)?)?
+        }
+        "git_diff" => git::diff(workspace.root())?,
+        _ => bail!("Unealta {} nu este activată în Agent Mode", call.name),
+    };
+    Ok(result.chars().take(30_000).collect())
+}
+
 #[tauri::command]
 pub fn chat_stream(
     project_id: i64,
@@ -821,11 +862,14 @@ pub fn chat_stream(
         .unwrap_or_default();
     let instructions = format!(
         r#"Ești agentul de programare din Nomad, un mediu local-first. Răspunde concis în limba utilizatorului.
-În acest MVP poți analiza contextul și propune cel mult o schimbare de fișier. Nu pretinde că ai executat unelte sau comenzi.
+Ești în Agent Mode: poți cere unelte read-only pentru a inspecta proiectul. Nu pretinde că ai executat o unealtă înainte să primești rezultatul acesteia.
+Când ai nevoie de una dintre uneltele read-only, încheie răspunsul cu exact un bloc:
+<nomad-tool>{{"name":"read_file","arguments":{{"path":"src/App.tsx"}}}}</nomad-tool>
+Unelte read-only: read_file(path), list_files(), search_files(query), git_diff(). Căile sunt relative la proiect. Nu solicita fișiere cu secrete.
+După ce primești rezultatul unei unelte, continuă analiza. Nu cere aceeași unealtă repetat fără motiv.
 Când este necesară o modificare, încheie răspunsul cu exact un bloc pe o singură linie:
 <nomad-change>{{"path":"cale/relativă","summary":"rezumat scurt","content":"conținutul COMPLET al fișierului"}}</nomad-change>
 Calea trebuie să fie relativă la proiect. Nu folosi .., căi absolute sau symlink-uri. Nu include blocul dacă utilizatorul cere doar explicații.
-Uneltele backend disponibile după confirmarea utilizatorului sunt: {}.
 
 Instrucțiuni personale ale utilizatorului pentru acest agent:
 {}
@@ -833,7 +877,6 @@ Instrucțiuni personale ale utilizatorului pentru acest agent:
 Fișiere proiect:
 {}{}
 "#,
-        agent_tools::TOOL_NAMES.join(", "),
         workflow_instructions,
         project_map,
         file_context
@@ -882,7 +925,31 @@ Fișiere proiect:
                 cancellations.lock().await.remove(&request_id);
                 return;
             }
-            result = provider.stream(request, delta_tx) => result,
+            result = async {
+                let mut next_request = request;
+                for _ in 0..=5 {
+                    // Tool-planning rounds stay hidden from the transcript; the final answer is
+                    // emitted after the orchestration loop, once intermediate calls are resolved.
+                    let (discard_tx, discard_rx) = tokio::sync::mpsc::unbounded_channel::<String>();
+                    drop(discard_rx);
+                    let content = provider.stream(next_request.clone(), discard_tx).await?;
+                    let Some(tool_call) = extract_tool_call(&content)? else {
+                        let _ = delta_tx.send(content.clone());
+                        return Ok::<String, anyhow::Error>(content);
+                    };
+                    let result = execute_agent_read_tool(&workspace, &tool_call)
+                        .unwrap_or_else(|error| format!("Unealta a eșuat: {error}"));
+                    next_request.messages.push(LlmMessage {
+                        role: "assistant".into(),
+                        content,
+                    });
+                    next_request.messages.push(LlmMessage {
+                        role: "user".into(),
+                        content: format!("Rezultatul uneltei {}: {}", tool_call.name, result),
+                    });
+                }
+                bail!("Agentul a depășit limita de 5 apeluri de unelte într-un singur mesaj")
+            } => result,
         };
         let _ = forwarder.await;
         match response {
@@ -1430,6 +1497,24 @@ mod tests {
         let change = extract_change(text).unwrap().unwrap();
         assert_eq!(change.path, "src/a.ts");
         assert_eq!(change.content, "hello");
+    }
+
+    #[test]
+    fn extracts_agent_tool_request_and_rejects_secret_reads() {
+        let call = extract_tool_call(
+            "<nomad-tool>{\"name\":\"read_file\",\"arguments\":{\"path\":\"src/main.rs\"}}</nomad-tool>",
+        )
+        .unwrap()
+        .unwrap();
+        assert_eq!(call.name, "read_file");
+        assert_eq!(call.arguments["path"], "src/main.rs");
+        let directory = tempfile::tempdir().unwrap();
+        let workspace = Workspace::new(directory.path()).unwrap();
+        let secret = AgentToolCall {
+            name: "read_file".into(),
+            arguments: serde_json::json!({"path": ".env.local"}),
+        };
+        assert!(execute_agent_read_tool(&workspace, &secret).is_err());
     }
 
     #[test]

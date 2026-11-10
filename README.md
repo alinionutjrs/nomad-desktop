@@ -85,10 +85,10 @@ cargo check --manifest-path src-tauri/Cargo.toml
 
 ## Limite cunoscute / etapele următoare
 
-- agentul propune o modificare completă de fișier per răspuns; bucla autonomă de unelte și editarea coordonată a mai multor fișiere sunt următoarea etapă;
+- Agent Mode poate orchestra până la cinci apeluri read-only (`read_file`, `list_files`, `search_files`, `git_diff`) per mesaj, apoi poate propune o modificare completă de fișier pentru aprobare; editarea multi-fișier rămâne pentru o etapă ulterioară;
 - un singur provider este activ pentru chat; mai multe profiluri API pot fi păstrate local, dar rutarea automată între modele nu este implementată;
 - Claude Code și Codex sunt lansate prin CLI-ul instalat și autentificat de utilizator. Claude Code rulează restricționat, fără unelte sau persistența sesiunii; Codex rulează efemer, read-only, cu configul de unelte personalizat dezactivat. CLI-urile și versiunile lor diferite nu au fost validate pe toate sistemele;
-- conectarea la servere MCP și bucla de unelte AI nu sunt implementate; agentul propune în prezent o modificare completă de fișier per răspuns;
+- conectarea la servere MCP nu este implementată; comenzile și scrierile agentului nu se execută automat, iar fiecare schimbare propusă rămâne în fluxul de diff/aprobare;
 - login, profil sincronizat, abonamente/credite, sync de date în Neon/Supabase, library, telemetry opt-in și deploy către hosting extern necesită configurare și integrare suplimentară;
 - exportul proiectului este disponibil; importul/migrarea bazei locale între calculatoare și editorul Monaco cu merge pe hunk urmează;
 - editorul este textarea cu diff line-based, fără Monaco și merge pe hunk;

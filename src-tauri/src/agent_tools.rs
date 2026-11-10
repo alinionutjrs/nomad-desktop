@@ -8,16 +8,6 @@ use std::time::Duration;
 use tokio::process::Command;
 use walkdir::{DirEntry, WalkDir};
 
-pub const TOOL_NAMES: &[&str] = &[
-    "read_file",
-    "list_files",
-    "search_files",
-    "write_file",
-    "apply_patch",
-    "run_command",
-    "git_diff",
-];
-
 const MAX_TEXT_FILE: u64 = 2 * 1024 * 1024;
 const MAX_ENTRIES: usize = 2_500;
 
