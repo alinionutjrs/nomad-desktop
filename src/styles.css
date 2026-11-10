@@ -522,6 +522,77 @@ button:focus-visible, a:focus-visible, input:focus-visible, textarea:focus-visib
 .settings-callout a, .settings-card a { color: var(--waypoint); }
 .settings-error, .toast { color: #ffe2dc; border-color: #784840; background: linear-gradient(145deg, #351e1a, #261816); }
 .settings-bullets { color: #c1cec0; }
+.settings-nav { padding: 18px 12px; }
+.settings-nav h2 { margin-bottom: 12px; }
+.settings-search { position: sticky; top: -18px; z-index: 1; display: flex; align-items: center; gap: 8px; margin: 0 0 16px; padding: 0 10px; color: #9caf9f; border: 1px solid #33453a; border-radius: 9px; background: #0e1711; }
+.settings-search:focus-within { border-color: #74aa75; box-shadow: 0 0 0 3px rgba(102, 222, 195, .07); }
+.settings-nav .settings-search input { width: 100%; min-width: 0; height: 40px; min-height: 40px; padding: 0; color: #e5efe5; font: inherit; font-size: 12px; border: 0; outline: 0; background: transparent; }
+.settings-nav .settings-search input:focus { box-shadow: none; }
+.settings-nav .settings-search button { width: 28px; min-width: 28px; min-height: 30px; display: grid; place-items: center; padding: 0; color: #a7b7aa; }
+.settings-no-results { margin: 10px 4px; color: #a4b2a5; font-size: 12px; line-height: 1.6; }
+.settings-content > header > p { max-width: 680px; margin: 8px 0 0; color: #a5b4a7; font-size: 13px; line-height: 1.55; }
+.settings-note { white-space: pre-line; }
+.permission-list { margin-top: 18px; }
+.permission-row { display: flex; align-items: center; justify-content: space-between; gap: 18px; padding: 14px 0; border-bottom: 1px solid #2b3a2f; }
+.permission-row > span { display: grid; gap: 5px; min-width: 0; }
+.permission-row strong { color: #e1ebe0; font: 600 12px 'DM Mono', monospace; overflow-wrap: anywhere; }
+.permission-row small { color: #a5b4a7; font-size: 12px; line-height: 1.5; }
+.permission-row b { flex: 0 0 auto; padding: 7px 9px; color: #e0edce; font-size: 11px; border: 1px solid #40563e; border-radius: 999px; background: #1a291d; }
+.settings-card > button { margin: 8px 8px 0 0; }
+.provider-presets { display: grid; gap: 8px; margin: 14px 0 8px; }
+.provider-presets > span { color: #c6d2c6; font-size: 13px; font-weight: 700; }
+.provider-presets > div { display: flex; flex-wrap: wrap; gap: 8px; }
+.provider-presets button.secondary { min-height: 40px; padding: 8px 12px; color: #d6e3d6; border: 1px solid #40563e; border-radius: 8px; background: #142019; cursor: pointer; }
+.provider-presets button.secondary:hover { border-color: #86b975; background: #1d2a21; }
+.custom-provider-manager { margin-top: 18px; }
+.provider-manager-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 14px; }
+.provider-manager-head > div { display: grid; gap: 4px; }
+.provider-manager-head strong { color: #e7f0e6; font-size: 14px; }
+.provider-manager-head small { color: #a5b4a7; font-size: 12px; }
+.provider-manager-head > button, .provider-empty > button { display: inline-flex; align-items: center; justify-content: center; gap: 7px; min-height: 42px; padding: 8px 12px; color: #dce9dc; font-size: 12px; border: 1px solid #40563e; border-radius: 9px; background: #142019; cursor: pointer; }
+.provider-empty { display: grid; justify-items: center; gap: 9px; padding: 27px 18px; color: #a6b6a6; text-align: center; border: 1px dashed #405144; border-radius: 12px; background: rgba(14, 23, 17, .55); }
+.provider-empty > strong { color: #e7f0e6; font-size: 15px; }
+.provider-empty > span { max-width: 400px; font-size: 12px; line-height: 1.55; }
+.provider-list { display: grid; gap: 10px; }
+.provider-card { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 15px; border: 1px solid #33453a; border-radius: 12px; background: rgba(12, 20, 15, .76); }
+.provider-card.is-active { border-color: #789a58; box-shadow: inset 3px 0 #b7f36b; }
+.provider-card-main { display: flex; align-items: flex-start; min-width: 0; gap: 12px; }
+.provider-card-icon { display: grid; place-items: center; width: 38px; height: 38px; flex: 0 0 38px; color: #122018; border-radius: 10px; background: linear-gradient(135deg, var(--accent), var(--waypoint)); }
+.provider-card-main > div:last-child { display: grid; min-width: 0; gap: 5px; }
+.provider-card-title { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
+.provider-card-title strong { color: #edf4e9; font-size: 14px; }
+.provider-card-title span { padding: 3px 7px; color: #172114; font-size: 9px; font-weight: 800; letter-spacing: .08em; border-radius: 999px; background: #b7f36b; }
+.provider-card-main small { overflow-wrap: anywhere; color: #9eae9f; font-size: 11px; line-height: 1.45; }
+.provider-card-main code { color: #d2dfd1; font-size: 11px; }
+.provider-card-actions { display: flex; align-items: center; justify-content: flex-end; flex: 0 0 auto; flex-wrap: wrap; gap: 7px; }
+.provider-card-actions > button.secondary { min-height: 38px; padding: 7px 10px; color: #d8e4d8; font-size: 11px; border: 1px solid #3a4d3e; border-radius: 8px; background: #17231a; cursor: pointer; }
+.provider-card-actions > button:disabled { opacity: .55; cursor: default; }
+.provider-card-actions > .provider-remove { display: grid; place-items: center; width: 38px; min-width: 38px; min-height: 38px; padding: 0; color: #ddb0a8; border: 1px solid #66413c; border-radius: 8px; background: #291b18; cursor: pointer; }
+.provider-dialog-backdrop { position: fixed; inset: 0; z-index: 30; display: grid; place-items: center; overflow: auto; padding: 24px; background: rgba(2, 7, 4, .78); backdrop-filter: blur(6px); }
+.provider-dialog { position: relative; width: min(620px, 100%); max-height: min(90vh, 900px); overflow: auto; padding: 28px; border: 1px solid #425a48; border-radius: 17px; background: linear-gradient(145deg, #17231b, #0e1711); box-shadow: 0 30px 100px rgba(0, 0, 0, .6); }
+.provider-dialog h2 { margin: 14px 0 7px; color: #eef5ec; font-size: 22px; }
+.provider-dialog > p { margin: 0 0 18px; color: #a6b6a8; font-size: 13px; line-height: 1.55; }
+.provider-dialog label { display: flex; flex-direction: column; gap: 7px; margin: 14px 0; color: #d0ded0; font-size: 13px; font-weight: 700; }
+.provider-dialog label small { color: #98aa9c; font-size: 11px; line-height: 1.5; font-weight: 400; }
+.provider-dialog input { width: 100%; min-height: 44px; padding: 10px 12px; color: #e5efe5; font-size: 13px; border: 1px solid #35493b; border-radius: 9px; outline: 0; background: #0d1510; }
+.provider-dialog input:focus { border-color: #6d9b6c; box-shadow: 0 0 0 3px rgba(102, 222, 195, .075); }
+.provider-dialog input:disabled { color: #8b9a8d; }
+.provider-dialog-close { position: absolute; top: 16px; right: 16px; display: grid; place-items: center; width: 38px; min-height: 38px; padding: 0; color: #a8b6a9; border: 1px solid #374a3b; border-radius: 9px; background: #121d15; cursor: pointer; }
+.provider-advanced { margin: 12px 0; border: 1px solid #34473a; border-radius: 10px; background: rgba(8, 15, 10, .55); }
+.provider-advanced summary { padding: 12px; color: #c6d4c7; font-size: 12px; font-weight: 700; cursor: pointer; }
+.provider-advanced > label { margin: 0; padding: 0 12px 12px; }
+.provider-dialog-actions { display: flex; justify-content: flex-end; gap: 9px; margin-top: 20px; padding-top: 14px; border-top: 1px solid #2e4033; }
+.provider-dialog-actions > button { display: inline-flex; align-items: center; justify-content: center; gap: 7px; min-height: 44px; padding: 9px 14px; color: #132014; font-size: 13px; font-weight: 700; border: 1px solid var(--accent); border-radius: 9px; background: var(--accent); cursor: pointer; }
+.provider-dialog-actions > button.secondary { color: #d4e0d4; border-color: #40563e; background: #17231a; }
+@media (max-width: 580px) {
+  .permission-row { align-items: flex-start; flex-direction: column; gap: 8px; }
+  .settings-search { position: static; }
+  .provider-card { align-items: flex-start; flex-direction: column; }
+  .provider-card-actions { width: 100%; justify-content: flex-start; }
+  .provider-manager-head { align-items: flex-start; flex-direction: column; }
+  .provider-dialog { padding: 22px 17px; }
+  .provider-dialog-backdrop { padding: 10px; }
+}
 .empty-panel { color: #91a294; }
 .empty-panel > svg { color: var(--waypoint); }
 .empty-panel h3 { color: #e1ece1; }

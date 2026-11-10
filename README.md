@@ -15,6 +15,7 @@ Nomad este o aplicație desktop local-first pentru construirea și editarea proi
 - preview localhost validat și iframe izolat;
 - diff local față de ultimul snapshot;
 - snapshot-uri Git și rollback confirmat;
+- export de proiect într-un folder ales, cu cheile, fișierele `.env`, directoarele Git și artefactele de build omise;
 - proiecte, mesaje, propuneri și setări ne-secrete în SQLite;
 - centru de setări pe categorii, profil local și trei accente vizuale persistente;
 - verificare la pornire și instalare de update-uri Tauri semnate, cu verificare manuală din Setări → Actualizări;
@@ -85,11 +86,11 @@ cargo check --manifest-path src-tauri/Cargo.toml
 ## Limite cunoscute / etapele următoare
 
 - agentul propune o modificare completă de fișier per răspuns; bucla autonomă de unelte și editarea coordonată a mai multor fișiere sunt următoarea etapă;
-- un singur provider este activ per conversație; API-ul permite un singur endpoint/key activ la un moment dat, deși acesta poate fi schimbat între OpenRouter, orice endpoint compatibil și servere locale; endpoint-urile nu au fost validate pentru fiecare furnizor/model;
+- un singur provider este activ pentru chat; mai multe profiluri API pot fi păstrate local, dar rutarea automată între modele nu este implementată;
 - Claude Code și Codex sunt lansate prin CLI-ul instalat și autentificat de utilizator. Claude Code rulează restricționat, fără unelte sau persistența sesiunii; Codex rulează efemer, read-only, cu configul de unelte personalizat dezactivat. CLI-urile și versiunile lor diferite nu au fost validate pe toate sistemele;
-- Anthropic API nativ, salvarea mai multor profiluri API, agenți multipli simultani și rutare între provideri nu sunt conectate;
-- login, profil sincronizat, abonamente/credite, sync de date în Neon/Supabase, catalog MCP, library, telemetry opt-in, diagnostic de securitate și deploy către hosting extern nu sunt implementate;
-- exportul explicit din interfață și importul/migrarea bazei locale urmează; sursa proiectelor rămâne în directoarele alese de utilizator;
+- conectarea la servere MCP și bucla de unelte AI nu sunt implementate; agentul propune în prezent o modificare completă de fișier per răspuns;
+- login, profil sincronizat, abonamente/credite, sync de date în Neon/Supabase, library, telemetry opt-in și deploy către hosting extern necesită configurare și integrare suplimentară;
+- exportul proiectului este disponibil; importul/migrarea bazei locale între calculatoare și editorul Monaco cu merge pe hunk urmează;
 - editorul este textarea cu diff line-based, fără Monaco și merge pe hunk;
 - portul preview nu este detectat automat;
 - terminal PTY interactiv, index semantic, worktrees și provideri suplimentari urmează;

@@ -8,7 +8,7 @@ use crate::models::*;
 use crate::process_manager::ProcessManager;
 use crate::security::Workspace;
 use anyhow::{bail, Context, Result};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::Path;
 use std::sync::Arc;
@@ -33,6 +33,54 @@ pub struct AppUpdateInfo {
     version: String,
     current_version: String,
     notes: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CustomAiProvider {
+    pub id: String,
+    pub name: String,
+    pub base_url: String,
+    pub model: String,
+    #[serde(default = "default_ai_protocol")]
+    pub protocol: String,
+    #[serde(default)]
+    pub api_key_env: String,
+}
+
+fn default_ai_protocol() -> String {
+    "openai-compatible".to_string()
+}
+
+fn custom_provider_credential_id(id: &str) -> Result<String> {
+    if id.is_empty()
+        || id.len() > 40
+        || !id.as_bytes()[0].is_ascii_lowercase() && !id.as_bytes()[0].is_ascii_digit()
+        || !id.bytes().all(|byte| {
+            byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'-' || byte == b'_'
+        })
+    {
+        bail!("ID-ul providerului trebuie să conțină doar litere mici, cifre, cratimă sau underscore (maximum 40 de caractere)");
+    }
+    Ok(format!("custom-provider-{id}"))
+}
+
+fn load_custom_ai_providers(db: &Database) -> Result<Vec<CustomAiProvider>> {
+    db.get_setting(0, "custom_ai_providers")?
+        .filter(|raw| !raw.trim().is_empty())
+        .map(|raw| serde_json::from_str(&raw).context("Lista providerelor custom este invalidă"))
+        .unwrap_or_else(|| Ok(Vec::new()))
+}
+
+fn load_custom_ai_provider(db: &Database, id: &str) -> Result<CustomAiProvider> {
+    load_custom_ai_providers(db)?
+        .into_iter()
+        .find(|provider| provider.id == id)
+        .ok_or_else(|| {
+            anyhow::anyhow!(
+                "Providerul custom selectat nu mai există. Alege alt provider în Setări AI."
+            )
+        })
 }
 
 const UPDATER_PUBLIC_KEY: &str = "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEU1MEVCRTA1NTI3MzQ5MDAKUldRQVNYTlNCYjRPNVNQUGZGaFdjZTVqN2lxWmxCVEp3TmllQVdacy85ZXNqdkRlaHUwMDBJQnkK";
@@ -314,6 +362,94 @@ pub fn list_projects(state: State<'_, AppState>) -> CommandResult<Vec<Project>> 
     command(state.db.list_projects())
 }
 
+fn copy_export_tree(source: &Path, target: &Path) -> Result<usize> {
+    let mut count = 0;
+    for entry in walkdir::WalkDir::new(source)
+        .follow_links(false)
+        .min_depth(1)
+        .max_depth(32)
+        .into_iter()
+        .filter_entry(|entry| {
+            !(entry.file_type().is_dir()
+                && matches!(
+                    entry.file_name().to_string_lossy().as_ref(),
+                    ".git"
+                        | "node_modules"
+                        | "target"
+                        | "dist"
+                        | ".next"
+                        | ".turbo"
+                        | ".venv"
+                        | "venv"
+                ))
+        })
+    {
+        let entry = entry?;
+        if entry.file_type().is_symlink() {
+            continue;
+        }
+        let relative = entry.path().strip_prefix(source)?;
+        let portable = relative.to_string_lossy().replace('\\', "/");
+        if crate::agent_tools::is_sensitive_path(&portable) {
+            continue;
+        }
+        let output = target.join(relative);
+        if entry.file_type().is_dir() {
+            fs::create_dir_all(output)?;
+        } else if entry.file_type().is_file() {
+            if count >= 100_000 {
+                bail!("Exportul depășește limita de 100.000 de fișiere.");
+            }
+            if let Some(parent) = output.parent() {
+                fs::create_dir_all(parent)?;
+            }
+            fs::copy(entry.path(), output)?;
+            count += 1;
+        }
+    }
+    Ok(count)
+}
+
+#[tauri::command]
+pub fn export_project_files(
+    project_id: i64,
+    destination_parent: String,
+    confirmation_token: String,
+    state: State<'_, AppState>,
+) -> CommandResult<String> {
+    command((|| {
+        state.confirmations.consume(
+            &confirmation_token,
+            &format!("project:export:{project_id}:{destination_parent}"),
+        )?;
+        let project = state.db.get_project(project_id)?;
+        let source = fs::canonicalize(&project.path).context("Directorul proiectului nu există")?;
+        let parent = fs::canonicalize(&destination_parent)
+            .context("Directorul ales pentru export nu există")?;
+        if !parent.is_dir() || parent.starts_with(&source) {
+            bail!("Alege un director de export din afara proiectului.");
+        }
+        let folder_name = source
+            .file_name()
+            .and_then(|name| name.to_str())
+            .filter(|name| !name.is_empty())
+            .unwrap_or("nomad-project");
+        let target = parent.join(format!("{folder_name}-export"));
+        if target.exists() {
+            bail!("Directorul de export există deja: {}", target.display());
+        }
+        fs::create_dir(&target)?;
+        let copied = copy_export_tree(&source, &target);
+        match copied {
+            Ok(count) => Ok(format!("{}|{}", target.display(), count)),
+            Err(error) => {
+                let _ = fs::remove_dir_all(&target);
+                Err(error)
+            }
+        }
+    })())
+}
+
 #[tauri::command]
 pub fn list_project_files(
     project_id: i64,
@@ -583,6 +719,7 @@ pub fn chat_stream(
         .get_setting(0, "ai_provider")
         .map_err(|error| error.to_string())?
         .unwrap_or_else(|| "api".into());
+    let mut custom_model = None;
     let provider: Box<dyn LlmProvider> = match provider_kind.as_str() {
         "claude-code" => Box::new(CliAgentProvider(CliAgent::ClaudeCode)),
         "codex" => Box::new(CliAgentProvider(CliAgent::Codex)),
@@ -592,8 +729,34 @@ pub fn chat_stream(
                 .get_setting(0, "ai_endpoint")
                 .map_err(|error| error.to_string())?;
             Box::new(
-                OpenAiProvider::from_keychain(endpoint.as_deref())
-                    .map_err(|error| error.to_string())?,
+                OpenAiProvider::from_keychain(
+                    endpoint.as_deref(),
+                    "openai-api-key",
+                    None,
+                    "openai-compatible",
+                )
+                .map_err(|error| error.to_string())?,
+            )
+        }
+        "custom" => {
+            let selected_id = state
+                .db
+                .get_setting(0, "active_custom_ai_provider")
+                .map_err(|error| error.to_string())?
+                .ok_or_else(|| "Selectează un provider custom în Setări AI.".to_string())?;
+            let custom = load_custom_ai_provider(&state.db, &selected_id)
+                .map_err(|error| error.to_string())?;
+            let credential_id =
+                custom_provider_credential_id(&custom.id).map_err(|error| error.to_string())?;
+            custom_model = Some(custom.model.clone());
+            Box::new(
+                OpenAiProvider::from_keychain(
+                    Some(&custom.base_url),
+                    &credential_id,
+                    (!custom.api_key_env.trim().is_empty()).then_some(custom.api_key_env.as_str()),
+                    &custom.protocol,
+                )
+                .map_err(|error| error.to_string())?,
             )
         }
         _ => return Err("Providerul AI selectat nu este valid".into()),
@@ -643,11 +806,13 @@ pub fn chat_stream(
         .map(|entry| entry.path.as_str())
         .collect::<Vec<_>>()
         .join("\n");
-    let model = state
-        .db
-        .get_setting(0, "openai_model")
-        .map_err(|error| error.to_string())?
-        .unwrap_or_else(|| "gpt-6-astra".into());
+    let model = custom_model.unwrap_or(
+        state
+            .db
+            .get_setting(0, "openai_model")
+            .map_err(|error| error.to_string())?
+            .unwrap_or_else(|| "gpt-6-astra".into()),
+    );
     let workflow_instructions = state
         .db
         .get_setting(0, "workflow_instructions")
@@ -684,6 +849,7 @@ Fișiere proiect:
             })
             .collect(),
         workspace: Some(workspace.root().to_path_buf()),
+        max_output_tokens: None,
     };
     let request_id = Uuid::new_v4().to_string();
     let returned_id = request_id.clone();
@@ -838,6 +1004,69 @@ pub fn has_api_key() -> bool {
 }
 
 #[tauri::command]
+pub fn save_custom_api_key(provider_id: String, api_key: String) -> CommandResult<()> {
+    command((|| {
+        let credential_id = custom_provider_credential_id(&provider_id)?;
+        OpenAiProvider::save_key_for(&credential_id, &api_key)
+    })())
+}
+
+#[tauri::command]
+pub fn delete_custom_api_key(provider_id: String) -> CommandResult<()> {
+    command((|| {
+        let credential_id = custom_provider_credential_id(&provider_id)?;
+        OpenAiProvider::delete_key_for(&credential_id)
+    })())
+}
+
+#[tauri::command]
+pub fn has_custom_api_key(provider_id: String) -> bool {
+    custom_provider_credential_id(&provider_id)
+        .map(|credential_id| OpenAiProvider::has_key_for(&credential_id))
+        .unwrap_or(false)
+}
+
+#[tauri::command]
+pub async fn test_custom_ai_provider(
+    provider_id: String,
+    state: State<'_, AppState>,
+) -> CommandResult<String> {
+    let result = async {
+        let custom = load_custom_ai_provider(&state.db, &provider_id)?;
+        let credential_id = custom_provider_credential_id(&custom.id)?;
+        let provider = OpenAiProvider::from_keychain(
+            Some(&custom.base_url),
+            &credential_id,
+            (!custom.api_key_env.trim().is_empty()).then_some(custom.api_key_env.as_str()),
+            &custom.protocol,
+        )?;
+        let request = LlmRequest {
+            model: custom.model,
+            instructions: "You are checking an API connection. Reply with OK.".into(),
+            messages: vec![LlmMessage {
+                role: "user".into(),
+                content: "Connection test. Reply with OK.".into(),
+            }],
+            workspace: None,
+            max_output_tokens: Some(8),
+        };
+        let (deltas, _receiver) = tokio::sync::mpsc::unbounded_channel();
+        let response = tokio::time::timeout(
+            std::time::Duration::from_secs(30),
+            provider.stream(request, deltas),
+        )
+        .await
+        .context("Testul providerului a depășit limita de 30 de secunde")??;
+        if response.trim().is_empty() {
+            bail!("Providerul s-a conectat, dar nu a returnat text");
+        }
+        Ok::<_, anyhow::Error>("Conexiunea a reușit. Providerul a returnat un răspuns.".to_string())
+    }
+    .await;
+    command(result)
+}
+
+#[tauri::command]
 pub fn detect_ai_cli_tools() -> Vec<CliToolStatus> {
     crate::cli_agents::statuses()
 }
@@ -846,6 +1075,8 @@ const APP_SETTING_KEYS: &[&str] = &[
     "openai_model",
     "ai_endpoint",
     "ai_provider",
+    "active_custom_ai_provider",
+    "custom_ai_providers",
     "theme",
     "ui_density",
     "profile_name",
@@ -921,8 +1152,11 @@ fn validate_app_setting(key: &str, value: &str) -> Result<()> {
         "ai_endpoint" if !value.trim().is_empty() => {
             crate::llm::chat_completions_endpoint(value.trim())?;
         }
-        "ai_provider" if !matches!(value, "api" | "claude-code" | "codex") => {
+        "ai_provider" if !matches!(value, "api" | "custom" | "claude-code" | "codex") => {
             bail!("Providerul AI selectat nu este permis");
+        }
+        "active_custom_ai_provider" if !value.trim().is_empty() => {
+            custom_provider_credential_id(value.trim())?;
         }
         "profile_name" if value.trim().is_empty() || value.len() > 80 => {
             bail!("Numele profilului trebuie să aibă 1–80 caractere");
@@ -952,6 +1186,45 @@ fn validate_app_setting(key: &str, value: &str) -> Result<()> {
                 serde_json::from_str(value).context("Registry-ul MCP trebuie să fie JSON valid")?;
             if !registry.is_array() || registry.as_array().is_some_and(|items| items.len() > 100) {
                 bail!("Registry-ul MCP trebuie să fie o listă JSON cu maximum 100 de servere");
+            }
+        }
+        "custom_ai_providers" if !value.trim().is_empty() => {
+            let providers: Vec<CustomAiProvider> = serde_json::from_str(value)
+                .context("Providerii custom trebuie să fie o listă JSON validă")?;
+            if providers.len() > 50 {
+                bail!("Poți configura maximum 50 de provideri custom");
+            }
+            let mut ids = std::collections::HashSet::new();
+            for provider in providers {
+                custom_provider_credential_id(&provider.id)?;
+                if !ids.insert(provider.id.clone()) {
+                    bail!("ID-urile providerilor trebuie să fie unice");
+                }
+                if provider.name.trim().is_empty() || provider.name.len() > 80 {
+                    bail!("Numele afișat trebuie să aibă 1–80 caractere");
+                }
+                if provider.model.trim().is_empty() || provider.model.len() > 160 {
+                    bail!("Numele modelului trebuie să aibă 1–160 caractere");
+                }
+                if !matches!(
+                    provider.protocol.as_str(),
+                    "openai-compatible"
+                        | "anthropic-messages"
+                        | "google-gemini"
+                        | "google-vertex-express"
+                        | "azure-openai"
+                ) {
+                    bail!("Formatul API selectat nu este disponibil");
+                }
+                crate::llm::chat_completions_endpoint(&provider.base_url)?;
+                if provider.api_key_env.len() > 128
+                    || (!provider.api_key_env.is_empty()
+                        && !provider.api_key_env.bytes().all(|byte| {
+                            byte.is_ascii_uppercase() || byte.is_ascii_digit() || byte == b'_'
+                        }))
+                {
+                    bail!("Numele variabilei de mediu poate conține doar majuscule, cifre și underscore");
+                }
             }
         }
         "workflow_timeout_seconds" | "tool_command_timeout" if !value.trim().is_empty() => {
@@ -1210,5 +1483,31 @@ mod tests {
         fs::create_dir(repository.join(".git")).unwrap();
         assert!(is_inside_repository(&nested).unwrap());
         assert!(!is_inside_repository(directory.path()).unwrap());
+    }
+
+    #[test]
+    fn project_export_includes_source_and_omits_secrets_and_build_folders() {
+        let directory = tempfile::tempdir().unwrap();
+        let source = directory.path().join("source");
+        let target = directory.path().join("export");
+        fs::create_dir_all(source.join("src")).unwrap();
+        fs::create_dir_all(source.join("node_modules")).unwrap();
+        fs::create_dir_all(source.join(".git")).unwrap();
+        fs::write(source.join("src/main.ts"), "source").unwrap();
+        fs::write(source.join(".env"), "secret").unwrap();
+        fs::write(source.join("node_modules/package.json"), "generated").unwrap();
+        fs::write(source.join(".git/config"), "git metadata").unwrap();
+        fs::create_dir(&target).unwrap();
+
+        let copied = copy_export_tree(&source, &target).unwrap();
+
+        assert_eq!(copied, 1);
+        assert_eq!(
+            fs::read_to_string(target.join("src/main.ts")).unwrap(),
+            "source"
+        );
+        assert!(!target.join(".env").exists());
+        assert!(!target.join("node_modules").exists());
+        assert!(!target.join(".git").exists());
     }
 }

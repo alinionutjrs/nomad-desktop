@@ -4,7 +4,7 @@ import { listen } from "@tauri-apps/api/event";
 import { open } from "@tauri-apps/plugin-dialog";
 import {
   Bot, Box, Check, ChevronRight, CircleStop, Clock3, Code2, File,
-  FileCode2, Folder, FolderOpen, GitCommitHorizontal, History, KeyRound,
+  FileCode2, Folder, FolderDown, FolderOpen, GitCommitHorizontal, History, KeyRound,
   LoaderCircle, MessageSquareText, Play, Plus, RefreshCw, RotateCcw,
   Save, Search, Settings, Sparkles, TerminalSquare, X,
 } from "lucide-react";
@@ -21,6 +21,21 @@ type SettingsSection = "general" | "updates" | "profile" | "ai" | "workflow" | "
 type Theme = "forest" | "ocean" | "violet";
 type Density = "comfortable" | "compact";
 type AiCliStatus = { id: string; available: boolean; executable: string | null; help_url: string };
+type ApiProtocol = "openai-compatible" | "anthropic-messages" | "google-gemini" | "google-vertex-express" | "azure-openai";
+type CustomAiProvider = { id: string; name: string; baseUrl: string; model: string; protocol: ApiProtocol; apiKeyEnv: string };
+const aiProviderTemplates: { id: string; label: string; provider: CustomAiProvider; modelHint: string; endpointHint?: string }[] = [
+  { id: "openai", label: "OpenAI", provider: { id: "openai", name: "OpenAI", baseUrl: "https://api.openai.com/v1", model: "", protocol: "openai-compatible", apiKeyEnv: "OPENAI_API_KEY" }, modelHint: "ID-ul modelului OpenAI" },
+  { id: "anthropic", label: "Anthropic", provider: { id: "anthropic", name: "Anthropic", baseUrl: "https://api.anthropic.com", model: "", protocol: "anthropic-messages", apiKeyEnv: "ANTHROPIC_API_KEY" }, modelHint: "ex: claude-sonnet-4-6" },
+  { id: "google", label: "Google Gemini", provider: { id: "google-gemini", name: "Google Gemini", baseUrl: "https://generativelanguage.googleapis.com/v1beta", model: "", protocol: "google-gemini", apiKeyEnv: "GEMINI_API_KEY" }, modelHint: "ex: gemini-2.5-flash" },
+  { id: "vertex", label: "Google Vertex AI · Express", provider: { id: "google-vertex", name: "Google Vertex AI", baseUrl: "https://aiplatform.googleapis.com/v1", model: "", protocol: "google-vertex-express", apiKeyEnv: "GOOGLE_VERTEX_API_KEY" }, modelHint: "ex: gemini-2.5-flash" },
+  { id: "openrouter", label: "OpenRouter", provider: { id: "openrouter", name: "OpenRouter", baseUrl: "https://openrouter.ai/api/v1", model: "", protocol: "openai-compatible", apiKeyEnv: "OPENROUTER_API_KEY" }, modelHint: "ex: provider/model · free models are available" },
+  { id: "azure", label: "Azure OpenAI", provider: { id: "azure-openai", name: "Azure OpenAI", baseUrl: "", model: "", protocol: "azure-openai", apiKeyEnv: "AZURE_OPENAI_API_KEY" }, modelHint: "numele deployment-ului Azure", endpointHint: "https://numele-resursei.openai.azure.com/openai/v1" },
+  { id: "bedrock", label: "Amazon Bedrock", provider: { id: "amazon-bedrock", name: "Amazon Bedrock", baseUrl: "", model: "", protocol: "openai-compatible", apiKeyEnv: "AWS_BEARER_TOKEN_BEDROCK" }, modelHint: "ID-ul modelului Bedrock disponibil în regiunea ta", endpointHint: "https://bedrock-mantle.REGION.api.aws/v1" },
+  { id: "xai", label: "xAI", provider: { id: "xai", name: "xAI", baseUrl: "https://api.x.ai/v1", model: "", protocol: "openai-compatible", apiKeyEnv: "XAI_API_KEY" }, modelHint: "ID-ul modelului xAI" },
+  { id: "minimax", label: "MiniMax", provider: { id: "minimax", name: "MiniMax", baseUrl: "https://api.minimax.io/v1", model: "", protocol: "openai-compatible", apiKeyEnv: "MINIMAX_API_KEY" }, modelHint: "ex: MiniMax-M3.1-Flash" },
+  { id: "ollama", label: "Ollama local", provider: { id: "ollama", name: "Ollama local", baseUrl: "http://localhost:11434/v1", model: "", protocol: "openai-compatible", apiKeyEnv: "" }, modelHint: "numele modelului instalat local" },
+  { id: "custom", label: "Alt provider OpenAI-compatible", provider: { id: "", name: "", baseUrl: "", model: "", protocol: "openai-compatible", apiKeyEnv: "" }, modelHint: "numele modelului providerului" },
+];
 type AppUpdateInfo = { version: string; currentVersion: string; notes: string | null };
 
 const emptyProcess: ProcessStatus = { running: false, pid: null, started_at: null, logs: [] };
@@ -230,6 +245,24 @@ function App() {
     } catch (error) { showError(error); }
   };
 
+  const exportProject = async () => {
+    if (!project) return;
+    const parent = await open({ directory: true, multiple: false, title: "Alege directorul pentru export" });
+    if (typeof parent !== "string") return;
+    try {
+      const result = await confirmedInvoke<string>(
+        "export_project_files",
+        { projectId: project.id, destinationParent: parent },
+        `project:export:${project.id}:${parent}`,
+        `Exporți o copie a proiectului „${project.name}” în ${parent}? Fișierele cu credențiale și folderele de build vor fi omise.`,
+      );
+      if (!result) return;
+      const [path, count] = result.split("|");
+      setNotice(`Exportat ${count ?? "0"} fișiere în ${path}.`);
+      window.setTimeout(() => setNotice(null), 6000);
+    } catch (error) { showError(error); }
+  };
+
   const selectFile = async (entry: FileEntry) => {
     if (!project || entry.is_dir) return;
     try {
@@ -376,6 +409,7 @@ function App() {
         <div className="brand"><button className="brand-mark" title="Restrânge meniul" onClick={() => setSidebarCollapsed((value) => !value)}><img src="/nomad-mark.svg" alt="" /></button><span>nomad</span><em>local</em></div>
         <div className="sidebar-heading"><span>Proiecte</span><div>
           <button className="icon-button" aria-label="Deschide proiect" title="Deschide proiect" onClick={chooseOpen}><FolderOpen size={17} /></button>
+          {project && <button className="icon-button" aria-label="Exportă proiectul" title="Exportă o copie a proiectului" onClick={() => void exportProject()}><FolderDown size={17} /></button>}
           <button className="icon-button" aria-label="Proiect nou" title="Proiect nou" onClick={chooseCreate}><Plus size={17} /></button>
         </div></div>
         <div className="project-list">
@@ -527,25 +561,27 @@ const settingsItems: { id: SettingsSection; label: string; group: string }[] = [
 ];
 
 function SettingsPanel({ section, onSection, theme, onTheme, density, onDensity, onSecretSaved, availableUpdate, onCheckUpdate, onInstallUpdate, updatingApp }: { section: SettingsSection; onSection: (value: SettingsSection) => void; theme: Theme; onTheme: (value: Theme) => void; density: Density; onDensity: (value: Density) => void; onSecretSaved: () => void; availableUpdate: AppUpdateInfo | null; onCheckUpdate: () => Promise<AppUpdateInfo | null>; onInstallUpdate: () => Promise<void>; updatingApp: boolean }) {
-  const [key, setKey] = useState("");
-  const [model, setModel] = useState("gpt-6-astra");
-  const [endpoint, setEndpoint] = useState("https://api.openai.com");
-  const [provider, setProvider] = useState("api");
-  const [cliTools, setCliTools] = useState<AiCliStatus[]>([]);
-  const [hasKey, setHasKey] = useState(false);
-  const [saved, setSaved] = useState(false);
-  useEffect(() => { Promise.all([invoke<boolean>("has_api_key"), invoke<string | null>("get_app_setting", { key: "openai_model" }), invoke<string | null>("get_app_setting", { key: "ai_endpoint" }), invoke<string | null>("get_app_setting", { key: "ai_provider" }), invoke<AiCliStatus[]>("detect_ai_cli_tools")]).then(([present, value, address, activeProvider, tools]) => { setHasKey(present); if (value) setModel(value); if (address) setEndpoint(address); if (activeProvider) setProvider(activeProvider); setCliTools(tools); }); }, []);
-  const save = async () => { if (provider === "api" && key.trim()) { await invoke("save_api_key", { apiKey: key.trim() }); setHasKey(true); setKey(""); onSecretSaved(); } await invoke("set_app_setting", { key: "ai_provider", value: provider }); await invoke("set_app_setting", { key: "openai_model", value: model.trim() }); await invoke("set_app_setting", { key: "ai_endpoint", value: endpoint.trim() }); setSaved(true); window.setTimeout(() => setSaved(false), 2200); };
-  const deleteKey = async () => { await invoke("delete_api_key"); setHasKey(false); onSecretSaved(); };
   const selected = settingsItems.find((item) => item.id === section)!;
-  const groups = [...new Set(settingsItems.map((item) => item.group))];
-  const showAiSettings = () => section === "ai";
-  if (showAiSettings()) return <AiProvidersSettings onSecretSaved={onSecretSaved} onSection={onSection} />;
-  return <section className="settings-layout"><aside className="settings-nav"><h2>Setări</h2>{groups.map((group) => <div key={group}><small>{group}</small>{settingsItems.filter((item) => item.group === group).map((item) => <button key={item.id} className={section === item.id ? "active" : ""} onClick={() => onSection(item.id)}>{item.label}</button>)}</div>)}</aside><div className="settings-content"><header><span>Setări / {selected.label}</span><h1>{selected.label}</h1></header>{section === "updates" ? <UpdateSettings availableUpdate={availableUpdate} onCheckUpdate={onCheckUpdate} onInstallUpdate={onInstallUpdate} updatingApp={updatingApp} /> : section === "ai" ? <AiProvidersSettings onSecretSaved={onSecretSaved} onSection={onSection} /> : section === "general" ? <GeneralSettings theme={theme} onTheme={onTheme} density={density} onDensity={onDensity} /> : section === "profile" ? <ProfileSettings /> : <FullSettingsSection section={section} />}</div></section>;
+  return <section className="settings-layout"><SettingsNavigation active={section} onSelect={onSection} /><div className="settings-content"><header><span>Setări / {selected.label}</span><h1>{selected.label}</h1><p>{settingsDescriptions[section]}</p></header>{section === "updates" ? <UpdateSettings availableUpdate={availableUpdate} onCheckUpdate={onCheckUpdate} onInstallUpdate={onInstallUpdate} updatingApp={updatingApp} /> : section === "ai" ? <AiProvidersSettings onSecretSaved={onSecretSaved} onSection={onSection} /> : section === "general" ? <GeneralSettings theme={theme} onTheme={onTheme} density={density} onDensity={onDensity} /> : section === "profile" ? <ProfileSettings /> : <FullSettingsSection section={section} />}</div></section>;
 }
 
+const settingsDescriptions: Record<SettingsSection, string> = {
+  general: "Aspectul aplicației și preferințele păstrate pe acest calculator.",
+  updates: "Alege sursa release-urilor și verifică actualizările Nomad.",
+  profile: "Un profil local pentru identificarea acestui dispozitiv.",
+  ai: "Configurează un API, un CLI autentificat sau un model local.",
+  workflow: "Instrucțiuni pentru agent și modul de lucru în proiecte.",
+  tools: "Uneltele agentului și serverele MCP configurate local.",
+  integrations: "Servicii externe, cloud și opțiuni de publicare.",
+  permissions: "Vezi ce poate face agentul și unde cere confirmarea ta.",
+  advanced: "Valori implicite pentru proiecte, preview și diagnosticare.",
+  experiments: "Funcții aflate în lucru. Opțiunile apar aici când sunt gata de folosit.",
+  help: "Pregătește o întrebare sau un raport pentru echipa Nomad.",
+  danger: "Exportă preferințele sau gestionează datele sensibile.",
+};
+
 function GeneralSettings({ theme, onTheme, density, onDensity }: { theme: Theme; onTheme: (value: Theme) => void; density: Density; onDensity: (value: Density) => void }) {
-  return <div className="settings-card"><h2>Aspect și date</h2><p>Preferințele Nomad și istoricul proiectelor sunt păstrate pe acest calculator.</p><SettingSelect title="Temă aplicație" value={theme} options={[{ value: "forest", label: "Pădure" }, { value: "ocean", label: "Ocean" }, { value: "violet", label: "Violet" }]} onChange={(value) => onTheme(value as Theme)} /><SettingSelect title="Densitatea interfeței" value={density} options={[{ value: "comfortable", label: "Confortabilă" }, { value: "compact", label: "Compactă" }]} onChange={(value) => onDensity(value as Density)} /><SettingsStatus title="Telemetrie" value="Dezactivată" description="Această versiune nu colectează și nu trimite evenimente de utilizare." /><div className="settings-callout"><strong>Stocare locală activă</strong><p>Proiecte, conversații și setări în SQLite; cheile API în seiful de credențiale al sistemului.</p></div></div>;
+  return <div className="settings-card"><h2>Aspect și date</h2><p>Preferințele Nomad și istoricul proiectelor sunt păstrate pe acest calculator.</p><SettingSelect title="Temă aplicație" value={theme} options={[{ value: "forest", label: "Pădure" }, { value: "ocean", label: "Ocean" }, { value: "violet", label: "Violet" }]} onChange={(value) => onTheme(value as Theme)} /><SettingSelect title="Densitatea interfeței" value={density} options={[{ value: "comfortable", label: "Confortabilă" }, { value: "compact", label: "Compactă" }]} onChange={(value) => onDensity(value as Density)} /><SettingsStatus title="Limbă interfață" value="Română" description="Limba disponibilă în această versiune." /><SettingsStatus title="Telemetrie anonimă" value="Dezactivată" description="Nomad nu colectează și nu trimite evenimente de utilizare." /><div className="settings-callout"><strong>Stocare locală activă</strong><p>Proiecte, conversații și setări în SQLite; cheile API în seiful de credențiale al sistemului.</p></div></div>;
 }
 
 function SettingSelect({ title, value, options, onChange }: { title: string; value: string; options: { value: string; label: string }[]; onChange: (value: string) => void }) {
@@ -565,10 +601,10 @@ function SettingToggle({ settingKey, title, description }: { settingKey: string;
 }
 
 const sectionConfig: Record<Exclude<SettingsSection, "general" | "updates" | "profile" | "ai">, { title: string; intro: string; fields: { key: string; label: string; placeholder: string }[]; toggles: { key: string; label: string; hint: string }[]; note: string }> = {
-  workflow: { title: "Workflow agent", intro: "Personalizează instrucțiunile trimise modelului. Toate schimbările de fișiere și comenzile rămân aprobate explicit.", fields: [{ key: "workflow_instructions", label: "Instrucțiuni suplimentare pentru agent", placeholder: "Preferă schimbări mici și explică deciziile…" }, { key: "workflow_timeout_seconds", label: "Timeout pentru comenzi (secunde)", placeholder: "120" }], toggles: [], note: "Instrucțiunile personalizate sunt incluse în contextul fiecărei conversații. Nomad creează snapshot înainte de schimbările acceptate." },
-  tools: { title: "Unelte și MCP", intro: "Configurează lista locală MCP și timeout-ul pentru comenzile agentului.", fields: [{ key: "mcp_servers_json", label: "Registry MCP (JSON)", placeholder: "[]" }, { key: "tool_command_timeout", label: "Timeout pentru unelte (secunde)", placeholder: "120" }], toggles: [], note: "Timeout-ul se aplică uneltelor run_command. Registry-ul MCP este validat și salvat; conectarea efectivă la MCP va fi activată după livrarea runtime-ului MCP." },
+  workflow: { title: "Workflow agent", intro: "Scrie instrucțiuni care se aplică conversațiilor noi. Schimbările propuse rămân în așteptare până le accepți.", fields: [{ key: "workflow_instructions", label: "Instrucțiuni suplimentare pentru agent", placeholder: "Exemplu: păstrează componentele mici, folosește TypeScript și explică pe scurt schimbările…" }], toggles: [], note: "Instrucțiunile sunt incluse în contextul agentului. Snapshot-urile Git se creează înainte de aplicarea propunerilor acceptate." },
+  tools: { title: "Unelte și MCP", intro: "Adaugă servere MCP pentru o etapă viitoare și configurează limita de timp pentru comenzile rulate în workspace.", fields: [{ key: "mcp_servers_json", label: "Servere MCP (format JSON)", placeholder: "[]" }, { key: "tool_command_timeout", label: "Durată maximă comandă (secunde)", placeholder: "120" }], toggles: [], note: "Timeout-ul este aplicat comenzilor run_command. Registrul MCP este validat și salvat local; conectarea la servere MCP nu este încă activă în această versiune." },
   integrations: { title: "Cloud, integrări și deploy", intro: "Configurează și verifică un endpoint de serviciu compatibil Nomad.", fields: [{ key: "cloud_api_url", label: "Nomad Cloud API", placeholder: "https://api.exemplu.ro" }], toggles: [], note: "Verificarea /health este activă. Autentificarea, sincronizarea, billing-ul și deploy-ul necesită un backend și credențiale configurate." },
-  permissions: { title: "Permisiuni agent", intro: "Permisiunile de siguranță active pentru toate proiectele locale.", fields: [], toggles: [], note: "✓ Scrierile de fișiere cer aprobare în ecranul diff.\n✓ Comenzile și serverele de dezvoltare cer confirmare.\n✓ Uneltele sunt limitate la workspace și blochează traversal/symlink-uri externe.\n✓ Rollback-ul creează snapshot Git înainte de restaurare.\nAceste protecții sunt obligatorii și nu pot fi dezactivate din setări." },
+  permissions: { title: "Permisiuni agent", intro: "Permisiunile de siguranță active pentru toate proiectele locale.", fields: [], toggles: [], note: "Aceste protecții sunt obligatorii și nu pot fi dezactivate din setări." },
   advanced: { title: "Avansat", intro: "Setări locale folosite ca valori implicite pentru proiectele deschise ulterior.", fields: [{ key: "default_dev_command", label: "Comandă dev server implicită", placeholder: "npm run dev -- --host 127.0.0.1" }, { key: "default_preview_url", label: "Preview implicit", placeholder: "http://127.0.0.1:5173" }, { key: "external_database_host", label: "Gazdă DB externă (opțional, doar hostname)", placeholder: "ep-example.region.aws.neon.tech" }], toggles: [], note: "Proiectele și conversațiile rămân în SQLite local. Gazda DB este doar notiță de configurare; această versiune nu migrează datele." },
   experiments: { title: "Experimente", intro: "Noutăți în dezvoltare, activate numai după ce sunt implementate și testate complet.", fields: [], toggles: [], note: "Momentan nu sunt experimente disponibile. Pagina se va popula odată cu funcții experimentale livrate în aplicație." },
   help: { title: "Ajutor și diagnostic", intro: "Pregătește un raport local și deschide mesajul în aplicația ta de e-mail pentru verificare.", fields: [{ key: "support_contact", label: "E-mail echipă suport", placeholder: "suport@domeniul-tau.ro" }, { key: "support_notes", label: "Detalii raport", placeholder: "Descrie eroarea și pașii care au dus la ea" }], toggles: [], note: "Raportul nu include proiecte, chei API sau loguri în mod automat." },
@@ -580,8 +616,12 @@ function FullSettingsSection({ section }: { section: Exclude<SettingsSection, "g
   const [values, setValues] = useState<Record<string, string>>({}); const [status, setStatus] = useState(""); const [checking, setChecking] = useState(false);
   useEffect(() => { void Promise.all(config.fields.map(async ({ key }) => [key, await invoke<string | null>("get_app_setting", { key })] as const)).then((pairs) => setValues(Object.fromEntries(pairs.map(([key, value]) => [key, value ?? ""])))).catch((error) => setStatus(String(error))); }, [section]);
   const save = async () => { try { for (const { key } of config.fields) await invoke("set_app_setting", { key, value: values[key] ?? "" }); setStatus("Setările au fost salvate local."); } catch (error) { setStatus(String(error)); } };
-  const exportPrefs = async () => { try { const keys = new Set(["theme", "language", "profile_name", "ai_endpoint", "openai_model", "ai_provider", "update_endpoint", ...Object.values(sectionConfig).flatMap((item) => [...item.fields.map((field) => field.key), ...item.toggles.map((toggle) => toggle.key)])]); const pairs = await Promise.all([...keys].map(async (key) => [key, await invoke<string | null>("get_app_setting", { key })] as const)); const safeSettings = Object.fromEntries(pairs.filter((pair): pair is readonly [string, string] => pair[1] !== null)); const blob = new Blob([JSON.stringify({ exportedAt: new Date().toISOString(), settings: safeSettings, note: "Cheile și tokenurile secrete au fost omise." }, null, 2)], { type: "application/json" }); const url = URL.createObjectURL(blob); const anchor = document.createElement("a"); anchor.href = url; anchor.download = "nomad-settings-export.json"; anchor.click(); URL.revokeObjectURL(url); setStatus("Exportul preferințelor a fost descărcat; secretele au fost omise."); } catch (error) { setStatus(String(error)); } };
-  return <div className="settings-card"><h2>{config.title}</h2><p>{config.intro}</p>{config.fields.map((field) => <label key={field.key}>{field.label}{field.key.includes("json") || field.key.includes("instructions") || field.key.includes("notes") ? <textarea rows={4} value={values[field.key] ?? ""} placeholder={field.placeholder} onChange={(event) => setValues((current) => ({ ...current, [field.key]: event.target.value }))} /> : <input value={values[field.key] ?? ""} placeholder={field.placeholder} onChange={(event) => setValues((current) => ({ ...current, [field.key]: event.target.value }))} />}</label>)}{config.toggles.map((toggle) => <SettingToggle key={toggle.key} settingKey={toggle.key} title={toggle.label} description={toggle.hint} />)}{section === "integrations" && <button className="secondary" disabled={checking || !values.cloud_api_url?.trim()} onClick={async () => { setChecking(true); try { const base = values.cloud_api_url.trim().replace(/\/$/, ""); const response = await fetch(`${base}/health`); if (!response.ok) throw new Error(`HTTP ${response.status}`); const health = await response.json() as { service?: string; billingConfigured?: boolean }; setStatus(`API conectat (${health.service ?? "serviciu"}); billing ${health.billingConfigured ? "configurat" : "neconfigurat"}.`); } catch (error) { setStatus(`Conexiunea nu a reușit: ${String(error)}`); } finally { setChecking(false); } }}><RefreshCw size={15} />{checking ? "Se verifică…" : "Verifică serviciul cloud"}</button>}{section === "help" && <button className="secondary" onClick={() => { const email = (values.support_contact ?? "").trim(); if (!email.includes("@")) { setStatus("Completează o adresă de suport validă înainte să compui raportul."); return; } const subject = encodeURIComponent("Raport Nomad"); const body = encodeURIComponent(values.support_notes ?? ""); window.location.href = `mailto:${email}?subject=${subject}&body=${body}`; setStatus("Mesajul a fost pregătit în aplicația de e-mail."); }}>Compune raport de suport</button>}{section === "danger" && <><button className="secondary" onClick={() => void exportPrefs()}><Save size={15} /> Exportă preferințele</button><button className="secondary" onClick={async () => { await invoke("delete_api_key"); setStatus("Cheia API a fost eliminată din seiful sistemului."); }}>Șterge cheia API din seiful sistemului</button></>}{config.fields.length > 0 && <button onClick={() => void save()}><Save size={15} /> Salvează</button>}<div className="settings-note">{config.note}</div>{status && <div className="settings-note">{status}</div>}</div>;
+  const exportPrefs = async () => { try { const keys = new Set(["theme", "language", "profile_name", "ai_endpoint", "openai_model", "ai_provider", "active_custom_ai_provider", "custom_ai_providers", "update_endpoint", ...Object.values(sectionConfig).flatMap((item) => [...item.fields.map((field) => field.key), ...item.toggles.map((toggle) => toggle.key)])]); const pairs = await Promise.all([...keys].map(async (key) => [key, await invoke<string | null>("get_app_setting", { key })] as const)); const safeSettings = Object.fromEntries(pairs.filter((pair): pair is readonly [string, string] => pair[1] !== null)); const blob = new Blob([JSON.stringify({ exportedAt: new Date().toISOString(), settings: safeSettings, note: "Cheile și tokenurile secrete au fost omise." }, null, 2)], { type: "application/json" }); const url = URL.createObjectURL(blob); const anchor = document.createElement("a"); anchor.href = url; anchor.download = "nomad-settings-export.json"; anchor.click(); URL.revokeObjectURL(url); setStatus("Exportul preferințelor a fost descărcat; secretele au fost omise."); } catch (error) { setStatus(String(error)); } };
+  return <div className="settings-card"><h2>{config.title}</h2><p>{config.intro}</p>{section === "permissions" && <div className="permission-list"><PermissionRow name="read_file · list_files · search_files · git_diff" detail="Citire și inspecție în dosarul proiectului" mode="Doar citire" /><PermissionRow name="write_file · apply_patch" detail="Modificările apar întâi ca propuneri; aplicarea cere acceptarea ta" mode="Aprobare necesară" /><PermissionRow name="run_command" detail="Execută în proiect, după confirmarea comenzii" mode="Confirmare necesară" /><PermissionRow name="Dev server" detail="Pornirea și oprirea serverului local sunt controlate din interfață" mode="Control manual" /><div className="settings-callout"><strong>Izolare locală</strong><p>Uneltele sunt restrânse la workspace; căile cu traversal sau symlink-uri în afara proiectului sunt blocate. Secretele uzuale sunt excluse din contextul AI.</p></div></div>}{config.fields.map((field) => <label key={field.key}>{field.label}{field.key.includes("json") || field.key.includes("instructions") || field.key.includes("notes") ? <textarea rows={field.key.includes("json") ? 7 : 4} spellCheck={field.key.includes("json") ? false : undefined} value={values[field.key] ?? ""} placeholder={field.placeholder} onChange={(event) => setValues((current) => ({ ...current, [field.key]: event.target.value }))} /> : <input inputMode={field.key.includes("timeout") ? "numeric" : undefined} value={values[field.key] ?? ""} placeholder={field.placeholder} onChange={(event) => setValues((current) => ({ ...current, [field.key]: event.target.value }))} />}</label>)}{config.toggles.map((toggle) => <SettingToggle key={toggle.key} settingKey={toggle.key} title={toggle.label} description={toggle.hint} />)}{section === "integrations" && <button className="secondary" disabled={checking || !values.cloud_api_url?.trim()} onClick={async () => { setChecking(true); try { const base = values.cloud_api_url.trim().replace(/\/$/, ""); const response = await fetch(`${base}/health`); if (!response.ok) throw new Error(`HTTP ${response.status}`); const health = await response.json() as { service?: string; billingConfigured?: boolean }; setStatus(`API conectat (${health.service ?? "serviciu"}); billing ${health.billingConfigured ? "configurat" : "neconfigurat"}.`); } catch (error) { setStatus(`Conexiunea nu a reușit: ${String(error)}`); } finally { setChecking(false); } }}><RefreshCw size={15} />{checking ? "Se verifică…" : "Verifică serviciul cloud"}</button>}{section === "help" && <button className="secondary" onClick={() => { const email = (values.support_contact ?? "").trim(); if (!email.includes("@")) { setStatus("Completează o adresă de suport validă înainte să compui raportul."); return; } const subject = encodeURIComponent("Raport Nomad"); const body = encodeURIComponent(values.support_notes ?? ""); window.location.href = `mailto:${email}?subject=${subject}&body=${body}`; setStatus("Mesajul a fost pregătit în aplicația de e-mail."); }}>Compune raport de suport</button>}{section === "danger" && <><button className="secondary" onClick={() => void exportPrefs()}><Save size={15} /> Exportă preferințele</button><button className="secondary" onClick={async () => { if (!window.confirm("Ștergi cheia API salvată în seiful sistemului? Această acțiune nu poate fi anulată.")) return; await invoke("delete_api_key"); setStatus("Cheia API a fost eliminată din seiful sistemului."); }}>Șterge cheia API din seiful sistemului</button></>}{config.fields.length > 0 && <button onClick={() => void save()}><Save size={15} /> Salvează setările</button>}{config.note && <div className="settings-note">{config.note}</div>}{status && <div role="status" className="settings-note">{status}</div>}</div>;
+}
+
+function PermissionRow({ name, detail, mode }: { name: string; detail: string; mode: string }) {
+  return <div className="permission-row"><span><strong>{name}</strong><small>{detail}</small></span><b>{mode}</b></div>;
 }
 
 function UpdateSettings({ availableUpdate, onCheckUpdate, onInstallUpdate, updatingApp }: { availableUpdate: AppUpdateInfo | null; onCheckUpdate: () => Promise<AppUpdateInfo | null>; onInstallUpdate: () => Promise<void>; updatingApp: boolean }) {
@@ -647,16 +687,129 @@ function AiProvidersSettings({ onSecretSaved, onSection }: { onSecretSaved: () =
     } catch (reason) { setError(String(reason)); }
   };
   const deleteKey = async () => {
+    if (!window.confirm("Ștergi cheia API salvată în seiful sistemului?")) return;
     try { await invoke("delete_api_key"); setHasKey(false); onSecretSaved(); }
     catch (reason) { setError(String(reason)); }
   };
   const selectedTool = tools.find((item) => item.id === provider);
-  return <section className="settings-layout"><SettingsNavigation active="ai" onSelect={onSection} /><div className="settings-content"><header><span>Setări / Furnizori AI</span><h1>Furnizori AI</h1></header><div className="settings-card"><div className="settings-icon"><KeyRound size={21} /></div><h2>Alege cum te conectezi</h2><p>Folosește o cheie API, abonamentul contului tău prin CLI, sau un model local gratuit. Nomad nu preia și nu copiază credentialele CLI.</p><label>Tip de furnizor<select value={provider} onChange={(event) => setProvider(event.target.value)}><option value="api">API extern / custom (OpenRouter și compatibile)</option><option value="claude-code">Claude Code CLI · contul tău Claude</option><option value="codex">Codex CLI · contul tău OpenAI</option></select></label>{provider === "api" ? <><label>Endpoint<input value={endpoint} onChange={(event) => setEndpoint(event.target.value)} placeholder="https://openrouter.ai/api/v1" /></label><label>Cheie API <span>{hasKey ? "Configurată în seiful sistemului" : "Lipsește · opțional pentru localhost"}</span><input type="password" autoComplete="new-password" value={key} onChange={(event) => setKey(event.target.value)} placeholder={hasKey ? "•••••••• (introdu alta pentru înlocuire)" : "Cheie API"} /></label><label>Model<input value={model} onChange={(event) => setModel(event.target.value)} placeholder="provider/model sau numele modelului" /></label><div className="settings-callout"><strong>Surse și opțiuni gratuite</strong><p>Pentru OpenRouter folosește endpoint-ul https://openrouter.ai/api/v1 și un model gratuit marcat free în catalogul lor. Pentru Ollama folosește http://localhost:11434/v1 și lasă cheia goală. Costurile și limitele sunt stabilite de furnizorul ales.</p>{tools.find((item) => item.id === "ollama")?.available ? <p>Ollama instalat: {tools.find((item) => item.id === "ollama")?.executable}</p> : <a href="https://ollama.com/download" target="_blank" rel="noreferrer">Descarcă Ollama pentru rulare locală</a>}<button className="secondary" onClick={() => setEndpoint("http://localhost:11434/v1")}>Configurează endpoint-ul Ollama</button></div></> : <div className="settings-callout"><strong>{selectedTool?.available ? `Găsit: ${selectedTool.executable}` : "CLI negăsit în PATH"}</strong><p>{provider === "codex" ? "Instalează Codex CLI și autentifică-te cu propriul cont ChatGPT/Codex. Cererile Nomad rulează read-only; modificările sunt propuneri pe care le aprobi în Nomad." : "Instalează Claude Code CLI și autentifică-te cu propriul cont Claude Pro/Max sau Console. Cererile rulează în plan mode, cu limită de un tur, fără aplicarea modificărilor."}</p>{selectedTool && <a href={selectedTool.help_url} target="_blank" rel="noreferrer">Instrucțiuni oficiale de instalare și autentificare</a>}{provider === "codex" && <a href="https://developers.openai.com/siwc/token-sharing-open-source/codex-app-server" target="_blank" rel="noreferrer">Detalii despre folosirea planului Codex</a>}</div>}{error && <div className="settings-error">{error}</div>}<button onClick={() => void save()}>{saved ? <Check size={15} /> : <Save size={15} />}{saved ? "Salvat" : "Salvează și activează"}</button>{provider === "api" && hasKey && <button className="secondary" onClick={() => void deleteKey()}>Șterge cheia API din seiful sistemului</button>}<div className="settings-note"><Search size={14} /> Cheile API sunt stocate în seiful sistemului. Claude Code și Codex folosesc separat sesiunea CLI existentă.</div></div><div className="settings-callout settings-wide"><strong>Utilizare simultană</strong><p>În această versiune este activ un singur provider pentru conversație; rutarea în paralel către mai multe API-uri va urma separat.</p></div></div></section>;
+  return <section className="settings-layout"><SettingsNavigation active="ai" onSelect={onSection} /><div className="settings-content"><header><span>Setări / Furnizori AI</span><h1>Furnizori AI</h1><p>{settingsDescriptions.ai}</p></header><div className="settings-card"><div className="settings-icon"><KeyRound size={21} /></div><h2>Alege cum te conectezi</h2><p>Configurează un API, un endpoint compatibil OpenAI sau autentificarea CLI locală.</p><label>Tip de furnizor<select value={provider} onChange={(event) => setProvider(event.target.value)}><option value="api">API standard (OpenAI, OpenRouter, Ollama)</option><option value="custom">Provider API personalizat</option><option value="claude-code">Claude Code CLI · contul tău Claude</option><option value="codex">Codex CLI · contul tău OpenAI</option></select></label>{provider === "custom" ? <CustomAiProvidersSettings onActivate={async (id) => { await invoke("set_app_setting", { key: "active_custom_ai_provider", value: id }); await invoke("set_app_setting", { key: "ai_provider", value: "custom" }); setProvider("custom"); setSaved(true); window.setTimeout(() => setSaved(false), 2000); }} /> : provider === "api" ? <><div className="provider-presets"><span>Setare rapidă endpoint</span><div><button type="button" className="secondary" onClick={() => setEndpoint("https://api.openai.com")}>OpenAI</button><button type="button" className="secondary" onClick={() => setEndpoint("https://openrouter.ai/api/v1")}>OpenRouter</button><button type="button" className="secondary" onClick={() => setEndpoint("http://localhost:11434/v1")}>Ollama local</button></div></div><label>Endpoint<input value={endpoint} onChange={(event) => setEndpoint(event.target.value)} placeholder="https://openrouter.ai/api/v1" /></label><label>Cheie API <span>{hasKey ? "Configurată în seiful sistemului" : "Lipsește · opțional pentru localhost"}</span><input type="password" autoComplete="new-password" value={key} onChange={(event) => setKey(event.target.value)} placeholder={hasKey ? "•••••••• (introdu alta pentru înlocuire)" : "Cheie API"} /></label><label>Model<input value={model} onChange={(event) => setModel(event.target.value)} placeholder="provider/model sau numele modelului" /></label><div className="settings-callout"><strong>Surse și opțiuni gratuite</strong><p>Pentru OpenRouter, alege un model marcat free în catalogul lor. Pentru Ollama, lasă cheia goală și rulează modelul local. Costurile și limitele depind de furnizor.</p>{tools.find((item) => item.id === "ollama")?.available ? <p>Ollama instalat: {tools.find((item) => item.id === "ollama")?.executable}</p> : <a href="https://ollama.com/download" target="_blank" rel="noreferrer">Descarcă Ollama pentru rulare locală</a>}</div></> : <div className="settings-callout"><strong>{selectedTool?.available ? `Găsit: ${selectedTool.executable}` : "CLI negăsit în PATH"}</strong><p>{provider === "codex" ? "Instalează Codex CLI și autentifică-te cu propriul cont ChatGPT/Codex. Cererile Nomad rulează read-only; modificările sunt propuneri pe care le aprobi în Nomad." : "Instalează Claude Code CLI și autentifică-te cu propriul cont Claude Pro/Max sau Console. Cererile rulează în plan mode, cu limită de un tur, fără aplicarea modificărilor."}</p>{selectedTool && <a href={selectedTool.help_url} target="_blank" rel="noreferrer">Instrucțiuni oficiale de instalare și autentificare</a>}{provider === "codex" && <a href="https://developers.openai.com/siwc/token-sharing-open-source/codex-app-server" target="_blank" rel="noreferrer">Detalii despre folosirea planului Codex</a>}</div>}{error && <div className="settings-error">{error}</div>}{provider !== "custom" && <button onClick={() => void save()}>{saved ? <Check size={15} /> : <Save size={15} />}{saved ? "Salvat" : "Salvează și activează"}</button>}{provider === "api" && hasKey && <button className="secondary" onClick={() => void deleteKey()}>Șterge cheia API din seiful sistemului</button>}<div className="settings-note"><Search size={14} /> Cheile API sunt stocate în seiful sistemului. Providerii custom își păstrează cheile separat în seiful sistemului.</div></div><div className="settings-callout settings-wide"><strong>Utilizare simultană</strong><p>Nomad folosește un provider activ pe conversație. Schimbarea providerului afectează conversațiile noi.</p></div></div></section>;
+}
+
+function CustomAiProvidersSettings({ onActivate }: { onActivate: (id: string) => Promise<void> }) {
+  const [providers, setProviders] = useState<CustomAiProvider[]>([]);
+  const [activeId, setActiveId] = useState("");
+  const [keys, setKeys] = useState<Record<string, boolean>>({});
+  const [draft, setDraft] = useState({ id: "", name: "", baseUrl: "", model: "", protocol: "openai-compatible" as ApiProtocol, apiKeyEnv: "", apiKey: "" });
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [selectedTemplate, setSelectedTemplate] = useState("custom");
+  const [dialogOpen, setDialogOpen] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const [status, setStatus] = useState("");
+  const loadProviders = useCallback(async () => {
+    const [raw, selected] = await Promise.all([
+      invoke<string | null>("get_app_setting", { key: "custom_ai_providers" }),
+      invoke<string | null>("get_app_setting", { key: "active_custom_ai_provider" }),
+    ]);
+    const stored = raw ? JSON.parse(raw) as (Partial<CustomAiProvider> & Pick<CustomAiProvider, "id" | "name" | "baseUrl" | "model" | "apiKeyEnv">)[] : [];
+    const list: CustomAiProvider[] = stored.map((item) => ({ ...item, protocol: item.protocol ?? "openai-compatible" }));
+    setProviders(list);
+    setActiveId(selected ?? "");
+    const keyPairs = await Promise.all(list.map(async (item) => [item.id, await invoke<boolean>("has_custom_api_key", { providerId: item.id })] as const));
+    setKeys(Object.fromEntries(keyPairs));
+  }, []);
+  useEffect(() => { void loadProviders().catch((reason) => setError(String(reason))); }, [loadProviders]);
+  const openNew = () => {
+    setEditingId(null);
+    setDraft({ id: "", name: "", baseUrl: "", model: "", protocol: "openai-compatible", apiKeyEnv: "", apiKey: "" });
+    setSelectedTemplate("custom");
+    setError("");
+    setDialogOpen(true);
+  };
+  const openEdit = (item: CustomAiProvider) => {
+    setEditingId(item.id);
+    setDraft({ ...item, apiKey: "" });
+    setSelectedTemplate(aiProviderTemplates.find((template) => template.provider.id === item.id)?.id ?? "custom");
+    setError("");
+    setDialogOpen(true);
+  };
+  const saveProvider = async () => {
+    setBusy(true);
+    setError("");
+    try {
+      const item: CustomAiProvider = {
+        id: editingId ?? draft.id.trim().toLowerCase(),
+        name: draft.name.trim(),
+        baseUrl: draft.baseUrl.trim().replace(/\/$/, ""),
+        model: draft.model.trim(),
+        protocol: draft.protocol,
+        apiKeyEnv: draft.apiKeyEnv.trim(),
+      };
+      if (!item.id || !/^[a-z0-9][a-z0-9_-]{0,39}$/.test(item.id)) throw new Error("ID-ul trebuie să înceapă cu literă sau cifră și să conțină doar litere mici, cifre, cratimă sau underscore.");
+      if (!item.name || !item.baseUrl || !item.model) throw new Error("Completează numele afișat, URL-ul API și modelul.");
+      if (!editingId && providers.some((current) => current.id === item.id)) throw new Error("Există deja un provider cu acest ID.");
+      const next = editingId
+        ? providers.map((current) => current.id === editingId ? item : current)
+        : [...providers, item];
+      await invoke("set_app_setting", { key: "custom_ai_providers", value: JSON.stringify(next) });
+      if (draft.apiKey.trim()) await invoke("save_custom_api_key", { providerId: item.id, apiKey: draft.apiKey.trim() });
+      setProviders(next);
+      if (draft.apiKey.trim()) setKeys((current) => ({ ...current, [item.id]: true }));
+      setDialogOpen(false);
+      setStatus(`„${item.name}” a fost salvat.`);
+    } catch (reason) { setError(String(reason)); }
+    finally { setBusy(false); }
+  };
+  const activate = async (item: CustomAiProvider) => {
+    setBusy(true); setError(""); setStatus("");
+    try {
+      await onActivate(item.id);
+      setActiveId(item.id);
+      setStatus(`„${item.name}” este providerul activ pentru conversațiile noi.`);
+    } catch (reason) { setError(String(reason)); }
+    finally { setBusy(false); }
+  };
+  const testProvider = async (item: CustomAiProvider) => {
+    setBusy(true); setError(""); setStatus("");
+    try { setStatus(await invoke<string>("test_custom_ai_provider", { providerId: item.id })); }
+    catch (reason) { setError(String(reason)); }
+    finally { setBusy(false); }
+  };
+  const removeProvider = async (item: CustomAiProvider) => {
+    if (!window.confirm(`Ștergi providerul „${item.name}” și cheia lui API salvată local?`)) return;
+    setBusy(true); setError("");
+    try {
+      const next = providers.filter((current) => current.id !== item.id);
+      await invoke("delete_custom_api_key", { providerId: item.id });
+      await invoke("set_app_setting", { key: "custom_ai_providers", value: JSON.stringify(next) });
+      setProviders(next);
+      setKeys((current) => { const copy = { ...current }; delete copy[item.id]; return copy; });
+      if (activeId === item.id) {
+        await invoke("set_app_setting", { key: "ai_provider", value: "api" });
+        setActiveId("");
+      }
+      setStatus(`„${item.name}” a fost șters.`);
+    } catch (reason) { setError(String(reason)); }
+    finally { setBusy(false); }
+  };
+  return <div className="custom-provider-manager">
+    <div className="provider-manager-head"><div><strong>Provideri API</strong><small>OpenAI compatible, Anthropic Messages, Gemini, Azure și Bedrock</small><small>„Testează” trimite o cerere scurtă; pot fi aplicate limitele sau costurile furnizorului.</small></div><button type="button" className="secondary" onClick={openNew}><Plus size={16} /> Adaugă provider</button></div>
+    {providers.length === 0 ? <div className="provider-empty"><KeyRound size={20} /><strong>Configurează primul provider</strong><span>Alege un furnizor din șabloane sau introdu valorile manual. Cheia API rămâne în seiful securizat al sistemului.</span><button type="button" onClick={openNew}><Plus size={16} /> Adaugă API personalizat</button></div> : <div className="provider-list">{providers.map((item) => <article className={`provider-card ${activeId === item.id ? "is-active" : ""}`} key={item.id}><div className="provider-card-main"><div className="provider-card-icon"><KeyRound size={18} /></div><div><div className="provider-card-title"><strong>{item.name}</strong>{activeId === item.id && <span>ACTIV</span>}</div><small>{item.baseUrl}</small><small>Model: <code>{item.model}</code></small><small>{item.protocol} · {keys[item.id] ? "Cheie stocată securizat" : item.apiKeyEnv ? `Cheie din ${item.apiKeyEnv} dacă există` : "Cheie API neconfigurată"}</small></div></div><div className="provider-card-actions"><button type="button" className="secondary" disabled={busy} onClick={() => void testProvider(item)}>Testează</button><button type="button" className="secondary" disabled={busy || activeId === item.id} onClick={() => void activate(item)}>{activeId === item.id ? "Activ" : "Folosește"}</button><button type="button" className="secondary" disabled={busy} onClick={() => openEdit(item)}>Editează</button><button type="button" className="provider-remove" title={`Șterge ${item.name}`} disabled={busy} onClick={() => void removeProvider(item)}><X size={16} /></button></div></article>)}</div>}
+    {error && <div role="alert" className="settings-error">{error}</div>}{status && <div role="status" className="settings-note">{status}</div>}
+    {dialogOpen && <div className="provider-dialog-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget && !busy) setDialogOpen(false); }}><section className="provider-dialog" role="dialog" aria-modal="true" aria-labelledby="provider-dialog-title"><button type="button" className="provider-dialog-close" aria-label="Închide" onClick={() => setDialogOpen(false)}><X size={18} /></button><div className="settings-icon"><Plus size={20} /></div><h2 id="provider-dialog-title">{editingId ? "Editează providerul" : "Adaugă provider API"}</h2><p>Alege un provider din listă pentru a completa automat adresa, formatul API și variabila de cheie. Secretul se păstrează separat în seiful sistemului.</p>{!editingId && <label>Provider<select value={selectedTemplate} onChange={(event) => { const selected = aiProviderTemplates.find((template) => template.id === event.target.value); if (!selected) return; setSelectedTemplate(selected.id); setDraft((current) => ({ ...selected.provider, apiKey: current.apiKey })); }}><option value="custom">Alt API compatibil</option>{aiProviderTemplates.filter((template) => template.id !== "custom").map((template) => <option key={template.id} value={template.id}>{template.label}</option>)}</select></label>}<label>ID provider<input disabled={Boolean(editingId)} value={editingId ?? draft.id} onChange={(event) => setDraft((current) => ({ ...current, id: event.target.value.toLowerCase().replace(/[^a-z0-9_-]/g, "-") }))} placeholder="ex: openrouter" autoFocus /></label><label>Nume afișat<input value={draft.name} onChange={(event) => setDraft((current) => ({ ...current, name: event.target.value }))} placeholder="ex: OpenRouter" /></label><label>URL de bază API<input value={draft.baseUrl} onChange={(event) => setDraft((current) => ({ ...current, baseUrl: event.target.value }))} placeholder={aiProviderTemplates.find((template) => template.id === selectedTemplate)?.endpointHint ?? "https://api.exemplu.com/v1"} /></label><label>Model<input value={draft.model} onChange={(event) => setDraft((current) => ({ ...current, model: event.target.value }))} placeholder={aiProviderTemplates.find((template) => template.id === selectedTemplate)?.modelHint ?? "ID-ul modelului din catalogul providerului"} /></label><label>Cheie API{keys[draft.id] && <small>Există o cheie salvată. Lasă gol pentru a o păstra.</small>}<input type="password" autoComplete="new-password" value={draft.apiKey} onChange={(event) => setDraft((current) => ({ ...current, apiKey: event.target.value }))} placeholder={keys[draft.id] ? "•••••••• · lasă gol pentru a păstra" : "Lipește cheia API"} /><small>Necesară pentru API-urile externe. Ollama local nu cere cheie.</small></label><details className="provider-advanced"><summary>Autentificare și format API</summary><label>Format API<select value={draft.protocol} onChange={(event) => setDraft((current) => ({ ...current, protocol: event.target.value as ApiProtocol }))}><option value="openai-compatible">OpenAI compatible · OpenRouter, xAI, MiniMax, Bedrock</option><option value="anthropic-messages">Anthropic Messages · Anthropic, MiniMax</option><option value="google-gemini">Google Gemini API</option><option value="google-vertex-express">Google Vertex AI Express</option><option value="azure-openai">Azure OpenAI</option></select></label><label>Variabilă de mediu pentru cheie (opțional)<input value={draft.apiKeyEnv} onChange={(event) => setDraft((current) => ({ ...current, apiKeyEnv: event.target.value.toUpperCase().replace(/[^A-Z0-9_]/g, "") }))} placeholder="ex: OPENROUTER_API_KEY" /><small>Valoarea acestei variabile are prioritate față de cheia din seif, dacă este prezentă.</small></label></details>{error && <div role="alert" className="settings-error">{error}</div>}<div className="provider-dialog-actions"><button type="button" className="secondary" disabled={busy} onClick={() => setDialogOpen(false)}>Anulează</button><button type="button" disabled={busy} onClick={() => void saveProvider()}>{busy ? <LoaderCircle size={15} className="spin" /> : <Save size={15} />}{editingId ? "Salvează providerul" : "Adaugă provider"}</button></div></section></div>}
+  </div>;
 }
 
 function SettingsNavigation({ active, onSelect }: { active: SettingsSection; onSelect: (value: SettingsSection) => void }) {
-  const groups = [...new Set(settingsItems.map((item) => item.group))];
-  return <aside className="settings-nav"><h2>Setări</h2>{groups.map((group) => <div key={group}><small>{group}</small>{settingsItems.filter((item) => item.group === group).map((item) => <button key={item.id} className={active === item.id ? "active" : ""} onClick={() => onSelect(item.id)}>{item.label}</button>)}</div>)}</aside>;
+  const [query, setQuery] = useState("");
+  const searchable = [
+    "aspect tema densitate locale", "update actualizare release", "profil nume cont",
+    "ai api personalizat custom provider openai anthropic claude codex model cheie ollama openrouter", "workflow instructiuni agent snapshot", "unelte mcp timeout servere", "integrari cloud deploy vercel neon supabase", "permisiuni securitate confirmare protectie", "avansat defaults comanda preview baza de date logs", "experimente beta functii noi", "ajutor suport diagnostic eroare feedback", "danger stergere reset export secret cheie",
+  ];
+  const normalized = query.trim().toLocaleLowerCase("ro");
+  const filteredItems = settingsItems.filter((item, index) => `${item.label} ${item.group} ${searchable[index]}`.toLocaleLowerCase("ro").includes(normalized));
+  const groups = [...new Set(filteredItems.map((item) => item.group))];
+  return <aside className="settings-nav"><h2>Setări</h2><label className="settings-search"><Search size={15} /><input aria-label="Caută în setări" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Caută setări…" />{query && <button title="Șterge căutarea" onClick={() => setQuery("")}><X size={14} /></button>}</label>{groups.map((group) => <div key={group}><small>{group}</small>{filteredItems.filter((item) => item.group === group).map((item) => <button key={item.id} className={active === item.id ? "active" : ""} onClick={() => onSelect(item.id)}>{item.label}</button>)}</div>)}{filteredItems.length === 0 && <p className="settings-no-results">Nicio setare găsită. Încearcă „AI”, „temă” sau „MCP”.</p>}</aside>;
 }
 
 function ProfileSettings() {

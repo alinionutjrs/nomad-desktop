@@ -11,7 +11,7 @@ pub struct Database {
 
 impl Database {
     pub fn open(path: &Path) -> Result<Self> {
-        let connection = Connection::open(path)
+        let mut connection = Connection::open(path)
             .with_context(|| format!("Nu pot deschide baza de date {}", path.display()))?;
         connection.execute_batch(
             "PRAGMA journal_mode = WAL;
@@ -25,6 +25,7 @@ impl Database {
              CREATE TABLE IF NOT EXISTS messages (
                id INTEGER PRIMARY KEY AUTOINCREMENT,
                project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+               session_id INTEGER REFERENCES chat_sessions(id) ON DELETE CASCADE,
                role TEXT NOT NULL,
                content TEXT NOT NULL,
                created_at TEXT NOT NULL
@@ -53,6 +54,40 @@ impl Database {
                PRIMARY KEY (project_id, key)
              );",
         )?;
+
+        // Older local databases stored messages by project only. Keep them intact and
+        // attach them to one imported conversation per project before isolating sessions.
+        let has_session_id = {
+            let mut statement = connection.prepare("PRAGMA table_info(messages)")?;
+            let columns = statement.query_map([], |row| row.get::<_, String>(1))?;
+            columns
+                .collect::<rusqlite::Result<Vec<_>>>()?
+                .iter()
+                .any(|name| name == "session_id")
+        };
+        if !has_session_id {
+            connection.execute(
+                "ALTER TABLE messages ADD COLUMN session_id INTEGER REFERENCES chat_sessions(id) ON DELETE CASCADE",
+                [],
+            )?;
+            let tx = connection.transaction()?;
+            tx.execute(
+                "INSERT INTO chat_sessions (project_id, title, created_at, updated_at)
+                 SELECT p.id, 'Conversație importată', MIN(m.created_at), MAX(m.created_at)
+                 FROM projects p JOIN messages m ON m.project_id = p.id
+                 WHERE NOT EXISTS (SELECT 1 FROM chat_sessions s WHERE s.project_id = p.id)
+                 GROUP BY p.id",
+                [],
+            )?;
+            tx.execute(
+                "UPDATE messages SET session_id = (
+                   SELECT s.id FROM chat_sessions s
+                   WHERE s.project_id = messages.project_id ORDER BY s.id ASC LIMIT 1
+                 ) WHERE session_id IS NULL",
+                [],
+            )?;
+            tx.commit()?;
+        }
         Ok(Self {
             connection: Mutex::new(connection),
         })
@@ -124,26 +159,6 @@ impl Database {
         Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
     }
 
-    pub fn insert_message(
-        &self,
-        project_id: i64,
-        role: &str,
-        content: &str,
-    ) -> Result<ChatMessage> {
-        let created_at = Utc::now().to_rfc3339();
-        let connection = self.lock()?;
-        connection.execute(
-            "INSERT INTO messages (project_id, role, content, created_at) VALUES (?1, ?2, ?3, ?4)",
-            params![project_id, role, content, created_at],
-        )?;
-        Ok(ChatMessage {
-            id: connection.last_insert_rowid(),
-            role: role.into(),
-            content: content.into(),
-            created_at,
-        })
-    }
-
     pub fn list_messages(&self, project_id: i64, limit: usize) -> Result<Vec<ChatMessage>> {
         let connection = self.lock()?;
         let mut statement = connection.prepare(
@@ -183,33 +198,53 @@ impl Database {
             .map_err(Into::into)
     }
 
-    pub fn update_session_title(&self, session_id: i64, title: &str) -> Result<()> {
-        self.lock()?.execute(
-            "UPDATE chat_sessions SET title = ?1, updated_at = ?2 WHERE id = ?3",
-            params![
-                title.chars().take(100).collect::<String>(),
-                Utc::now().to_rfc3339(),
-                session_id
-            ],
-        )?;
-        Ok(())
-    }
-
     pub fn insert_session_message(
         &self,
         session_id: i64,
         role: &str,
         content: &str,
     ) -> Result<ChatMessage> {
-        let (project_id, _) = self.get_chat_session(session_id)?;
-        let message = self.insert_message(project_id, role, content)?;
-        self.update_session_title(session_id, &content.chars().take(80).collect::<String>())?;
-        Ok(message)
+        let created_at = Utc::now().to_rfc3339();
+        let connection = self.lock()?;
+        let project_id: i64 = connection
+            .query_row(
+                "SELECT project_id FROM chat_sessions WHERE id = ?1",
+                [session_id],
+                |row| row.get(0),
+            )
+            .context("Conversația nu există")?;
+        connection.execute(
+            "INSERT INTO messages (project_id, session_id, role, content, created_at) VALUES (?1, ?2, ?3, ?4, ?5)",
+            params![project_id, session_id, role, content, created_at],
+        )?;
+        connection.execute(
+            "UPDATE chat_sessions SET title = CASE WHEN title = '' OR title = 'Conversație nouă' THEN ?1 ELSE title END, updated_at = ?2 WHERE id = ?3",
+            params![content.chars().take(80).collect::<String>(), created_at, session_id],
+        )?;
+        Ok(ChatMessage {
+            id: connection.last_insert_rowid(),
+            role: role.into(),
+            content: content.into(),
+            created_at,
+        })
     }
 
     pub fn list_session_messages(&self, session_id: i64, limit: usize) -> Result<Vec<ChatMessage>> {
-        let (project_id, _) = self.get_chat_session(session_id)?;
-        self.list_messages(project_id, limit)
+        let connection = self.lock()?;
+        let mut statement = connection.prepare(
+            "SELECT id, role, content, created_at FROM (
+               SELECT id, role, content, created_at FROM messages WHERE session_id = ?1 ORDER BY id DESC LIMIT ?2
+             ) ORDER BY id ASC"
+        )?;
+        let rows = statement.query_map(params![session_id, limit as i64], |row| {
+            Ok(ChatMessage {
+                id: row.get(0)?,
+                role: row.get(1)?,
+                content: row.get(2)?,
+                created_at: row.get(3)?,
+            })
+        })?;
+        Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
     }
 
     pub fn list_chat_sessions(&self, project_id: i64) -> Result<Vec<serde_json::Value>> {
@@ -321,5 +356,57 @@ impl Database {
                 |row| row.get(0),
             )
             .optional()?)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use rusqlite::Connection;
+
+    #[test]
+    fn sessions_keep_messages_isolated_within_a_project() -> Result<()> {
+        let directory = tempfile::tempdir()?;
+        let db = Database::open(&directory.path().join("nomad.sqlite3"))?;
+        let project = db.upsert_project("demo", "C:/demo")?;
+        let first = db.create_chat_session(project.id, "Prima")?;
+        let second = db.create_chat_session(project.id, "A doua")?;
+
+        db.insert_session_message(first, "user", "Întrebare unu")?;
+        db.insert_session_message(second, "user", "Întrebare doi")?;
+
+        assert_eq!(
+            db.list_session_messages(first, 100)?[0].content,
+            "Întrebare unu"
+        );
+        assert_eq!(
+            db.list_session_messages(second, 100)?[0].content,
+            "Întrebare doi"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn upgrades_legacy_project_messages_without_losing_history() -> Result<()> {
+        let directory = tempfile::tempdir()?;
+        let path = directory.path().join("legacy.sqlite3");
+        let legacy = Connection::open(&path)?;
+        legacy.execute_batch(
+            "CREATE TABLE projects (id INTEGER PRIMARY KEY, name TEXT NOT NULL, path TEXT NOT NULL UNIQUE, created_at TEXT NOT NULL);
+             CREATE TABLE messages (id INTEGER PRIMARY KEY, project_id INTEGER NOT NULL, role TEXT NOT NULL, content TEXT NOT NULL, created_at TEXT NOT NULL);
+             CREATE TABLE chat_sessions (id INTEGER PRIMARY KEY, project_id INTEGER NOT NULL, title TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL);
+             INSERT INTO projects VALUES (1, 'demo', 'C:/demo', '2026-11-10T00:00:00Z');
+             INSERT INTO messages VALUES (1, 1, 'user', 'Istoric păstrat', '2026-11-10T00:00:00Z');",
+        )?;
+        drop(legacy);
+
+        let db = Database::open(&path)?;
+        let session_id = db
+            .latest_chat_session_id(1)?
+            .expect("legacy conversation created");
+        let messages = db.list_session_messages(session_id, 100)?;
+        assert_eq!(messages.len(), 1);
+        assert_eq!(messages[0].content, "Istoric păstrat");
+        Ok(())
     }
 }
